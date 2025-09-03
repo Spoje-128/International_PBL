@@ -7,12 +7,10 @@ class MotorControl {
 public:
   MotorControl();
   void init();
-  void moveForward(int speed);
-  void moveBackward(int speed);
+  void move(int baseSpeed, int correction);
   void turnLeft(int speed);
   void turnRight(int speed);
   void stopRobot();
-  void robotTest();
 
 private:
   // L298Nモータードライバのピン定義

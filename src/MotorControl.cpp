@@ -16,6 +16,18 @@ void MotorControl::init() {
   Serial.println("Left Wheel: ENB(D10), D6(IN3), D7(IN4)");
 }
 
+void MotorControl::move(int baseSpeed, int correction) {
+  int leftSpeed = baseSpeed - correction;
+  int rightSpeed = baseSpeed + correction;
+
+  // 速度をPWMの範囲内（0-255）に収める
+  leftSpeed = constrain(leftSpeed, 0, 255);
+  rightSpeed = constrain(rightSpeed, 0, 255);
+
+  leftWheelForward(leftSpeed);
+  rightWheelForward(rightSpeed);
+}
+
 // 右車輪を前進させる関数
 void MotorControl::rightWheelForward(int speed) {
   analogWrite(ENA, speed);
@@ -58,34 +70,6 @@ void MotorControl::leftWheelStop() {
   digitalWrite(IN4, LOW);
 }
 
-// ロボット全体を前進させる関数
-void MotorControl::moveForward(int speed) {
-  rightWheelForward(speed);
-  leftWheelForward(speed);
-  Serial.println("Moving Forward");
-}
- 
-// ロボット全体を後進させる関数
-void MotorControl::moveBackward(int speed) {
-  rightWheelBackward(speed);
-  leftWheelBackward(speed);
-  Serial.println("Moving Backward");
-}
-
-// 左旋回する関数（右車輪前進、左車輪後進）
-void MotorControl::turnLeft(int speed) {
-  rightWheelForward(speed);
-  leftWheelBackward(speed);
-  Serial.println("Turning Left");
-}
-
-// 右旋回する関数（左車輪前進、右車輪後進）
-void MotorControl::turnRight(int speed) {
-  leftWheelForward(speed);
-  rightWheelBackward(speed);
-  Serial.println("Turning Right");
-}
-
 // ロボットを停止させる関数
 void MotorControl::stopRobot() {
   rightWheelStop();
@@ -93,37 +77,13 @@ void MotorControl::stopRobot() {
   Serial.println("Robot Stopped");
 }
 
-// ロボット動作テスト関数
-void MotorControl::robotTest() {
-  Serial.println("=== Robot Movement Test ===");
-  
-  // 前進テスト
-  moveForward(255);
-  delay(2000);
-  
-  stopRobot();
-  delay(1000);
-  
-  // 後進テスト
-  moveBackward(255);
-  delay(2000);
-  
-  stopRobot();
-  delay(1000);
-  
-  // // 左旋回テスト
-  // turnLeft(150);
-  // delay(1000);
-  
-  // stopRobot();
-  // delay(1000);
-  
-  // // 右旋回テスト
-  // turnRight(150);
-  // delay(1000);
-  
-  // stopRobot();
-  // delay(2000);
-  
-  Serial.println("Test cycle completed\n");
+void MotorControl::turnLeft(int speed) {
+  rightWheelForward(speed);
+  leftWheelBackward(speed);
 }
+
+void MotorControl::turnRight(int speed) {
+  leftWheelForward(speed);
+  rightWheelBackward(speed);
+}
+
