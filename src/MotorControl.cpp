@@ -1,6 +1,10 @@
 #include "MotorControl.h"
 
-MotorControl::MotorControl() {}
+MotorControl::MotorControl() {
+  // モーター回転方向フラグを初期化（false = 正転）
+  rightMotorReversed = false;
+  leftMotorReversed = true;
+}
 
 void MotorControl::init() {
   // モーター制御ピンを出力として設定
@@ -28,18 +32,35 @@ void MotorControl::move(int baseSpeed, int correction) {
   rightWheelForward(rightSpeed);
 }
 
+void MotorControl::moveBackward(int speed) {
+  leftWheelBackward(speed);
+  rightWheelBackward(speed);
+}
+
 // 右車輪を前進させる関数
 void MotorControl::rightWheelForward(int speed) {
-  analogWrite(ENA, speed);
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
+  analogWrite(ENA, speed - 20);
+  if (rightMotorReversed) {
+    // 逆転フラグがtrueの場合、方向を反転
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+  } else {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+  }
 }
 
 // 右車輪を後進させる関数
 void MotorControl::rightWheelBackward(int speed) {
-  analogWrite(ENA, speed);
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
+  analogWrite(ENA, speed - 20);
+  if (rightMotorReversed) {
+    // 逆転フラグがtrueの場合、方向を反転
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+  } else {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+  }
 }
 
 // 右車輪を停止させる関数
@@ -52,15 +73,27 @@ void MotorControl::rightWheelStop() {
 // 左車輪を前進させる関数
 void MotorControl::leftWheelForward(int speed) {
   analogWrite(ENB, speed);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
+  if (leftMotorReversed) {
+    // 逆転フラグがtrueの場合、方向を反転
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+  } else {
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+  }
 }
 
 // 左車輪を後進させる関数
 void MotorControl::leftWheelBackward(int speed) {
   analogWrite(ENB, speed);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
+  if (leftMotorReversed) {
+    // 逆転フラグがtrueの場合、方向を反転
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+  } else {
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+  }
 }
 
 // 左車輪を停止させる関数
@@ -85,5 +118,16 @@ void MotorControl::turnLeft(int speed) {
 void MotorControl::turnRight(int speed) {
   leftWheelForward(speed);
   rightWheelBackward(speed);
+}
+
+// モーターの回転方向を設定する関数
+void MotorControl::setMotorDirection(bool rightReversed, bool leftReversed) {
+  rightMotorReversed = rightReversed;
+  leftMotorReversed = leftReversed;
+  
+  Serial.print("Motor direction set - Right: ");
+  Serial.print(rightReversed ? "REVERSED" : "NORMAL");
+  Serial.print(", Left: ");
+  Serial.println(leftReversed ? "REVERSED" : "NORMAL");
 }
 

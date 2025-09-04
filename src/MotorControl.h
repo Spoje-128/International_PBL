@@ -8,9 +8,11 @@ public:
   MotorControl();
   void init();
   void move(int baseSpeed, int correction);
+  void moveBackward(int speed);
   void turnLeft(int speed);
   void turnRight(int speed);
   void stopRobot();
+  void setMotorDirection(bool rightReversed, bool leftReversed);
 
 private:
   // L298Nモータードライバのピン定義
@@ -22,6 +24,10 @@ private:
   // OutputB（左車輪）制御用
   static const int IN3 = 6;   // D6ピン - 左車輪モーター制御ピン3
   static const int IN4 = 7;   // D7ピン - 左車輪モーター制御ピン4
+
+  // モーター回転方向反転フラグ
+  bool rightMotorReversed;
+  bool leftMotorReversed;
 
   void rightWheelForward(int speed);
   void rightWheelBackward(int speed);
