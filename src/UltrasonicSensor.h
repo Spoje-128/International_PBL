@@ -11,29 +11,24 @@ public:
   float getCenterDistance();
   float getRightDistance();
   void getAllDistances(float& left, float& center, float& right);
-  bool isObstacleDetected(float threshold = 20.0); // デフォルト閾値20cm
+  bool isObstacleDetected(float threshold = 10.0); // デフォルト閾値10cm
 
 private:
-  // 左センサー用ピン
-  static const int LEFT_TRIG = 2;
-  static const int LEFT_ECHO = 3;
+  // 左センサー用ピン (Arduino Mega)
+  static const int LEFT_TRIG = 22;
+  static const int LEFT_ECHO = 23;
   
-  // 中央センサー用ピン
-  static const int CENTER_TRIG = 13;
-  static const int CENTER_ECHO = 12;
+  // 中央センサー用ピン (Arduino Mega)
+  static const int CENTER_TRIG = 24;
+  static const int CENTER_ECHO = 25;
   
-  // 右センサー用ピン
-  static const int RIGHT_TRIG = A1;
-  static const int RIGHT_ECHO = A0;
+  // 右センサー用ピン (Arduino Mega)
+  static const int RIGHT_TRIG = 26;
+  static const int RIGHT_ECHO = 27;
   
   float measureDistance(int trigPin, int echoPin);
   float filterDistance(float newDistance, float previousDistance);
   void updateSensors(); // 非ブロッキング更新メソッド
-  
-  // 前回の測定値（ノイズフィルタ用）
-  float previousLeftDistance;
-  float previousCenterDistance;
-  float previousRightDistance;
   
   // 現在の測定値（リアルタイム）
   float currentLeftDistance;

@@ -1,9 +1,6 @@
 #include "UltrasonicSensor.h"
 
 UltrasonicSensor::UltrasonicSensor() {
-  previousLeftDistance = 0.0;
-  previousCenterDistance = 0.0;
-  previousRightDistance = 0.0;
   currentLeftDistance = 0.0;
   currentCenterDistance = 0.0;
   currentRightDistance = 0.0;
@@ -27,44 +24,44 @@ void UltrasonicSensor::init() {
   pinMode(RIGHT_TRIG, OUTPUT);
   pinMode(RIGHT_ECHO, INPUT);
   
-  Serial.println("Ultrasonic Sensors initialized");
-  Serial.println("Left: Trig=D2, Echo=D3");
-  Serial.println("Center: Trig=D13, Echo=D12");
-  Serial.println("Right: Trig=D12, Echo=D13");
+  Serial.println("Ultrasonic Sensors initialized for Arduino Mega");
+  Serial.println("Left: Trig=22, Echo=23");
+  Serial.println("Center: Trig=24, Echo=25");
+  Serial.println("Right: Trig=26, Echo=27");
   Serial.println("All three sensors enabled");
 }
 
 float UltrasonicSensor::getLeftDistance() {
   updateSensors(); // 非ブロッキング更新を実行
-  return previousLeftDistance;
+  return currentLeftDistance;
 }
 
 float UltrasonicSensor::getCenterDistance() {
   updateSensors(); // 非ブロッキング更新を実行
-  return previousCenterDistance;
+  return currentCenterDistance;
 }
 
 float UltrasonicSensor::getRightDistance() {
   updateSensors(); // 非ブロッキング更新を実行
-  return previousRightDistance;
+  return currentRightDistance;
 }
 
 void UltrasonicSensor::getAllDistances(float& left, float& center, float& right) {
   updateSensors(); // 非ブロッキング更新を実行
   
   // 最新の値を返す
-  left = previousLeftDistance;
-  center = previousCenterDistance;
-  right = previousRightDistance;
+  left = currentLeftDistance;
+  center = currentCenterDistance;
+  right = currentRightDistance;
 }
 
 bool UltrasonicSensor::isObstacleDetected(float threshold) {
   updateSensors(); // 非ブロッキング更新を実行
-  
-  float left = previousLeftDistance;
-  float center = previousCenterDistance;
-  float right = previousRightDistance;
-  
+
+  float left = currentLeftDistance;
+  float center = currentCenterDistance;
+  float right = currentRightDistance;
+
   // いずれかのセンサーで閾値以下の距離を検出した場合、障害物ありと判定
   bool obstacleDetected = (left <= threshold || center <= threshold || right <= threshold);
   
@@ -91,6 +88,14 @@ float UltrasonicSensor::measureDistance(int trigPin, int echoPin) {
   // Echoピンからの応答時間を測定（タイムアウトを延長）
   unsigned long duration = pulseIn(echoPin, HIGH, 50000); // 50msタイムアウト
   
+  // デバッグ出力
+  // Serial.print("Trig:");
+  // Serial.print(trigPin);
+  // Serial.print(", Echo:");
+  // Serial.print(echoPin);
+  // Serial.print(", Duration:");
+  // Serial.print(duration);
+  
   // 距離を計算（音速: 約343m/s = 0.0343cm/μs）
   // 往復時間なので2で割る
   float distance = (duration * 0.0343) / 2.0;
@@ -98,7 +103,13 @@ float UltrasonicSensor::measureDistance(int trigPin, int echoPin) {
   // 測定範囲外の場合は最大値を返す
   if (duration == 0 || distance <= 2.0 || distance > 400) {
     distance = 400.0; // 測定可能最大距離
+    // Serial.print(", Distance: TIMEOUT/ERROR -> 400cm");
+  } else {
+    // Serial.print(", Distance:");
+    // Serial.print(distance);
+    // Serial.print("cm");
   }
+  // Serial.println();
   
   return distance;
 }
@@ -159,7 +170,8 @@ void UltrasonicSensor::updateSensors() {
             }
           }
           currentLeftDistance = (validCount > 0) ? (sum / validCount) : 400.0;
-          previousLeftDistance = filterDistance(currentLeftDistance, previousLeftDistance);
+          // Serial.print("current left distance: ");
+          // Serial.print(currentLeftDistance);
           
           // 次の状態へ
           currentSensorState = MEASURE_CENTER;
@@ -189,7 +201,8 @@ void UltrasonicSensor::updateSensors() {
             }
           }
           currentCenterDistance = (validCount > 0) ? (sum / validCount) : 400.0;
-          previousCenterDistance = filterDistance(currentCenterDistance, previousCenterDistance);
+          // Serial.print(", current center distance: ");
+          // Serial.print(currentCenterDistance);
           
           // 次の状態へ
           currentSensorState = MEASURE_RIGHT;
@@ -219,7 +232,8 @@ void UltrasonicSensor::updateSensors() {
             }
           }
           currentRightDistance = (validCount > 0) ? (sum / validCount) : 400.0;
-          previousRightDistance = filterDistance(currentRightDistance, previousRightDistance);
+          // Serial.print(", current right distance: ");
+          // Serial.print(currentRightDistance);
           
           // 測定完了、IDLEに戻る
           currentSensorState = IDLE;
@@ -227,11 +241,11 @@ void UltrasonicSensor::updateSensors() {
           
           // 結果を出力
           Serial.print("Non-blocking - L: ");
-          Serial.print(previousLeftDistance);
+          Serial.print(currentLeftDistance);
           Serial.print("cm, C: ");
-          Serial.print(previousCenterDistance);
+          Serial.print(currentCenterDistance);
           Serial.print("cm, R: ");
-          Serial.print(previousRightDistance);
+          Serial.print(currentRightDistance);
           Serial.println("cm");
         }
       }
