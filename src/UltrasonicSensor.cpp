@@ -53,6 +53,7 @@ void UltrasonicSensor::getAllDistances(float& left, float& center, float& right)
   left = currentLeftDistance;
   center = currentCenterDistance;
   right = currentRightDistance;
+
 }
 
 bool UltrasonicSensor::isObstacleDetected(float threshold) {

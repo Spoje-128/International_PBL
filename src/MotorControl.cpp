@@ -165,7 +165,6 @@ void MotorControl::turnLeft(int speed) {
 }
 
 void MotorControl::turnRight(int speed) {
-  // 従来の関数を角速度ベースに変更
   // speedをノミナル角速度にスケーリング
   float angularVelocity = NOMINAL_TURN_RATE * (speed / 150.0); // 正=右旋回
   turnAtAngularVelocity(angularVelocity);
@@ -216,7 +215,7 @@ void MotorControl::updateAngularControl() {
   }
   
   unsigned long currentTime = millis();
-  if (currentTime - lastControlUpdate < 20) { // 50Hz制御
+  if (currentTime - lastControlUpdate < 10) { // 100Hz制御
     return;
   }
   lastControlUpdate = currentTime;

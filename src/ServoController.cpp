@@ -2,6 +2,12 @@
 
 ServoController::ServoController() {
   currentAngle = 90;  // 初期角度90度（中央）
+  
+  // ノンブロッキングスイープの初期化
+  sweepActive = false;
+  sweepStep = 0;
+  sweepLastTime = 0;
+  sweepStepDuration = 600; // 各ステップ600ms
 }
 
 void ServoController::init() {
@@ -66,4 +72,78 @@ void ServoController::sweep() {
 
 int ServoController::getCurrentAngle() {
   return currentAngle;
+}
+
+// ノンブロッキングスイープ開始
+void ServoController::startNonBlockingSweep() {
+  sweepActive = true;
+  sweepStep = 0;
+  sweepLastTime = millis();
+  Serial.println("Non-blocking sweep started");
+}
+
+// ノンブロッキングスイープ更新
+void ServoController::updateNonBlockingSweep() {
+  if (!sweepActive) return;
+  
+  unsigned long currentTime = millis();
+  
+  // 前のステップから十分な時間が経過していない場合は何もしない
+  if (currentTime - sweepLastTime < sweepStepDuration) {
+    return;
+  }
+  
+  // スイープステップを実行
+  switch (sweepStep) {
+    case 0: // 0度に移動（振り下ろし）
+      setAngle(0);
+      sweepStepDuration = 600;
+      Serial.println("Sweep: Strike down (0°)");
+      break;
+      
+    case 1: // 180度に移動（振り上げ）
+      setAngle(180);
+      sweepStepDuration = 600;
+      Serial.println("Sweep: Strike up (180°)");
+      break;
+      
+    case 2: // 0度に移動（振り下ろし）
+      setAngle(0);
+      sweepStepDuration = 600;
+      Serial.println("Sweep: Strike down (0°)");
+      break;
+      
+    case 3: // 180度に移動（振り上げ）
+      setAngle(180);
+      sweepStepDuration = 600;
+      Serial.println("Sweep: Strike up (180°)");
+      break;
+      
+    case 4: // 中央に戻る
+      setAngle(90);
+      sweepStepDuration = 400;
+      Serial.println("Sweep: Return center (90°)");
+      break;
+      
+    default:
+      // スイープ完了、最初に戻る
+      sweepStep = -1; // 次のステップで0になる
+      sweepStepDuration = 800; // 少し長めの間隔
+      break;
+  }
+  
+  sweepStep++;
+  sweepLastTime = currentTime;
+}
+
+// ノンブロッキングスイープ停止
+void ServoController::stopNonBlockingSweep() {
+  sweepActive = false;
+  setAngle(90); // 中央に戻す
+  Serial.println("Non-blocking sweep stopped");
+}
+
+// スイープ中かどうか
+bool ServoController::isSweeping() {
+  return sweepActive;
 }
