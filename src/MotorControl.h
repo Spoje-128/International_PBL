@@ -63,6 +63,7 @@ private:
   float angularKd;        // 微分ゲイン / 微分增益
   float angularErrorSum;  // 積分項 / 积分项
   float angularLastError; // 前回誤差 / 上次误差
+  unsigned long lastPidUpdate; // PID計算用のタイムスタンプ / PID计算时间戳
 
   void rightWheelForward(int speed);
   void rightWheelBackward(int speed);

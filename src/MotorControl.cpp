@@ -21,11 +21,14 @@ MotorControl::MotorControl() {
   lastControlUpdate = 0;
   
   // PID制御パラメータ（要調整）
-  angularKp = 500.0;        // 比例ゲイン（1000.0→500.0に減少）
-  angularKi = 0.0;         // 積分ゲイン
-  angularKd = 5.0;         // 微分ゲイン（10.0→5.0に減少）
+  // 二重PID問題を解消するため、ゲインを現実的な値に見直し。
+  // The gain is reviewed to a realistic value to eliminate the dual PID problem.
+  angularKp = 20.0;        // 比例ゲイン / Proportional gain
+  angularKi = 0.5;         // 積分ゲイン / Integral gain
+  angularKd = 10.0;        // 微分ゲイン / Derivative gain
   angularErrorSum = 0.0;
   angularLastError = 0.0;
+  lastPidUpdate = 0;
 }
 
 void MotorControl::init() {
@@ -148,6 +151,7 @@ void MotorControl::stopRobot() {
   angularControlActive = false; // フィードバック制御も停止
   angularErrorSum = 0.0;        // 積分項をリセット
   angularLastError = 0.0;
+  lastPidUpdate = 0;            // PID時間もリセット
   Serial.println("Robot Stopped (angular control deactivated)");
 }
 
@@ -189,6 +193,14 @@ void MotorControl::setGyroSensor(GyroSensor* gyro) {
 }
 
 void MotorControl::moveWithAngularVelocity(float linearSpeed, float targetAngularVel) {
+  // 新しい目標が設定されたら、PIDの状態をリセットする
+  // Reset PID state when a new target is set
+  if (targetAngularVelocity != targetAngularVel || currentLinearSpeed != linearSpeed) {
+      angularErrorSum = 0.0;
+      angularLastError = 0.0;
+      lastPidUpdate = 0;
+  }
+
   targetAngularVelocity = targetAngularVel;
   currentLinearSpeed = linearSpeed;
   angularControlActive = true;
@@ -293,19 +305,31 @@ void MotorControl::calculateWheelSpeeds(float linearSpeed, float angularVelocity
 }
 
 float MotorControl::angularPIDControl(float targetAngular, float currentAngular) {
+  unsigned long currentTime = millis();
+  float dt = 0.0;
+  if (lastPidUpdate != 0) {
+    dt = (currentTime - lastPidUpdate) / 1000.0; // 経過時間を秒単位に
+  }
+  lastPidUpdate = currentTime;
+
+  // dtが0または異常に大きい場合は計算をスキップ
+  if (dt <= 0 || dt > 0.5) {
+    return 0.0;
+  }
+
   float error = targetAngular - currentAngular;
   
   // 積分項（ワインドアップ対策付き）
-  angularErrorSum += error;
+  angularErrorSum += error * dt;
   angularErrorSum = constrain(angularErrorSum, -100.0, 100.0);
   
   // 微分項
-  float errorDiff = error - angularLastError;
+  float derivative = (error - angularLastError) / dt;
   angularLastError = error;
   
   // PID出力
-  float output = angularKp * error + angularKi * angularErrorSum + angularKd * errorDiff;
+  float output = (angularKp * error) + (angularKi * angularErrorSum) + (angularKd * derivative);
   
-  return constrain(output, -50.0, 50.0); // PWM補正値を制限
+  return constrain(output, -150.0, 150.0); // PWM補正値の制限を緩和
 }
 

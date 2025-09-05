@@ -1,7 +1,6 @@
 #include <Arduino.h>
 
 #include "MotorControl.h"
-#include "PIDController.h"
 #include "PixyCam.h"
 #include "UltrasonicSensor.h"
 #include "ServoController.h"
@@ -9,7 +8,6 @@
 
 MotorControl motor;
 PixyCam pixy;
-PIDController pid(0.65, 0.0, 0.3);  // 画像処理用のPIDゲイン / 图像处理用PID增益
 UltrasonicSensor ultrasonic;
 ServoController servoCont;
 GyroSensor gyro;  // ジャイロセンサーのインスタンス / 陀螺仪传感器实例
@@ -156,7 +154,6 @@ void loop() {
         if (searchState != NOT_SEARCHING) {
             // 探索モードだった場合は解除 / 如果是搜索模式则解除
             searchState = NOT_SEARCHING;
-            pid.reset();  // PIDをリセット / 重置PID
             motor.stopRobot();
             delay(1000);
             Serial.println("Object found, tracking started.");
@@ -170,16 +167,15 @@ void loop() {
 
         // 障害物回避中でない場合のみ、通常のPID制御でオブジェクトを追跡 / 仅在非障碍物回避中时，用正常PID控制追踪对象
         if (avoidanceState == NO_AVOIDANCE) {
-                // 障害物がない場合、PID制御でオブジェクトを追跡 / 无障碍物时，用PID控制追踪对象
-                // x_offset: 負=左(-160〜0), 正=右(0〜+160)  目標は中央(0) / x_offset: 负=左(-160~0), 正=右(0~+160) 目标是中央(0)
-                float pidOutput = pid.calculate(0, x_offset);  // エラー = 0 - x_offset / 错误 = 0 - x_offset
-                
-                // pidOutputを角速度補正として使用 / 将pidOutput用作角速度补正
-                // x_offsetが正（右）→ pidOutputは負 → 右に曲がる必要 → 正の角速度 / x_offset为正（右）→ pidOutput为负 → 需要右转 → 正角速度
-                float angularCorrection = -pidOutput / 160.0;
-                // 角速度を制限（急激な旋回を防ぐ） / 限制角速度（防止急剧转向）
-                // angularCorrection = constrain(angularCorrection, -8.0, 8.0); // 制限を緩和（10.0→8.0）
-                
+                // 障害物がない場合、比例制御でオブジェクトを追跡
+                // When there are no obstacles, track the object with proportional control.
+                // x_offsetから直接目標角速度を計算（外側PIDを撤廃）
+                // Calculate target angular velocity directly from x_offset (outer PID removed)
+                // K_angularは調整用ゲイン。x_offsetが最大(160)の時に目標角速度が約32deg/sになるように設定。
+                // K_angular is a gain for adjustment. Set so that the target angular velocity is approx. 32deg/s when x_offset is max (160).
+                const float K_angular = 0.2f;
+                float targetAngularVelocity = K_angular * x_offset;
+
                 // 距離に応じた前進速度調整 / 根据距离调整前进速度
                 float forwardSpeed;
                 if (abs(x_offset) < 80) {
@@ -190,14 +186,14 @@ void loop() {
                     forwardSpeed = BASE_SPEED * 0.3;
                 }
                 
-                motor.moveWithAngularVelocity(forwardSpeed, angularCorrection);
+                motor.moveWithAngularVelocity(forwardSpeed, targetAngularVelocity);
                 
                 // デバッグ出力（500ms間隔で制限）
                 if (currentTime - lastDebugTime > DEBUG_INTERVAL) {
                     Serial.print("TRACK - X:");
                     Serial.print(x_offset);
-                    Serial.print(" Ang:");
-                    Serial.print(angularCorrection, 1);
+                    Serial.print(" TargetAng:");
+                    Serial.print(targetAngularVelocity, 1);
                     Serial.print(" Speed:");
                     Serial.print(forwardSpeed, 1);
                     Serial.print(" Dist L:");
