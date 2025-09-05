@@ -23,9 +23,9 @@ MotorControl::MotorControl() {
   // PID制御パラメータ（要調整）
   // 二重PID問題を解消するため、ゲインを現実的な値に見直し。
   // The gain is reviewed to a realistic value to eliminate the dual PID problem.
-  angularKp = 20.0;        // 比例ゲイン / Proportional gain
-  angularKi = 0.5;         // 積分ゲイン / Integral gain
-  angularKd = 10.0;        // 微分ゲイン / Derivative gain
+  angularKp = 10.0;        // 比例ゲイン / Proportional gain
+  angularKi = 0.0;         // 積分ゲイン / Integral gain
+  angularKd = 2.0;        // 微分ゲイン / Derivative gain
   angularErrorSum = 0.0;
   angularLastError = 0.0;
   lastPidUpdate = 0;

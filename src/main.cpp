@@ -173,7 +173,7 @@ void loop() {
                 // Calculate target angular velocity directly from x_offset (outer PID removed)
                 // K_angularは調整用ゲイン。x_offsetが最大(160)の時に目標角速度が約32deg/sになるように設定。
                 // K_angular is a gain for adjustment. Set so that the target angular velocity is approx. 32deg/s when x_offset is max (160).
-                const float K_angular = 0.2f;
+                const float K_angular = 0.75f;
                 float targetAngularVelocity = K_angular * x_offset;
 
                 // 距離に応じた前進速度調整 / 根据距离调整前进速度
