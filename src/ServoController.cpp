@@ -97,25 +97,25 @@ void ServoController::updateNonBlockingSweep() {
   switch (sweepStep) {
     case 0: // 0度に移動（振り下ろし）
       setAngle(0);
-      sweepStepDuration = 600;
+      sweepStepDuration = 400;
       Serial.println("Sweep: Strike down (0°)");
       break;
       
     case 1: // 180度に移動（振り上げ）
       setAngle(180);
-      sweepStepDuration = 600;
+      sweepStepDuration = 400;
       Serial.println("Sweep: Strike up (180°)");
       break;
       
     case 2: // 0度に移動（振り下ろし）
       setAngle(0);
-      sweepStepDuration = 600;
+      sweepStepDuration = 400;
       Serial.println("Sweep: Strike down (0°)");
       break;
       
     case 3: // 180度に移動（振り上げ）
       setAngle(180);
-      sweepStepDuration = 600;
+      sweepStepDuration = 400;
       Serial.println("Sweep: Strike up (180°)");
       break;
       
@@ -128,7 +128,7 @@ void ServoController::updateNonBlockingSweep() {
     default:
       // スイープ完了、最初に戻る
       sweepStep = -1; // 次のステップで0になる
-      sweepStepDuration = 800; // 少し長めの間隔
+      sweepStepDuration = 200; // 少し長めの間隔
       break;
   }
   

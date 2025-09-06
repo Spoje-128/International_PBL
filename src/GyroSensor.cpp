@@ -9,6 +9,11 @@ GyroSensor::GyroSensor() : bno(Adafruit_BNO055(55, 0x29)) {
   filteredAngularVelocityZ = 0.0;
   lastUpdateTime = 0;
   calibrationComplete = false;
+  
+  // ヨー角オフセット管理の初期化
+  yawOffsetDegrees = 0.0;
+  yawReferenceSet = false;
+  yawResetTime = 0;
 }
 
 bool GyroSensor::init() {
@@ -28,6 +33,10 @@ bool GyroSensor::init() {
   
   // 初期キャリブレーション状態をチェック
   checkSensorStatus();
+  
+  // 初期ヨー角基準値を設定（少し待ってから）
+  delay(500);
+  resetYawReference();
   
   return true;
 }
@@ -97,6 +106,61 @@ void GyroSensor::getAllAngularVelocities(float& x, float& y, float& z) {
   x = filteredAngularVelocityX * PI / 180.0; // deg/s → rad/s
   y = filteredAngularVelocityY * PI / 180.0; // deg/s → rad/s
   z = filteredAngularVelocityZ * PI / 180.0; // deg/s → rad/s
+}
+
+float GyroSensor::getYaw() {
+  // オイラー角（ヨー角）を取得 [度]
+  imu::Vector<3> euler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+  return euler.x(); // ヨー角（度）
+}
+
+float GyroSensor::getRelativeYaw() {
+  // 相対ヨー角を取得（初期化時からの変化量）[度]
+  float currentYaw = getYaw();
+  
+  // 基準値が未設定の場合は設定
+  if (!yawReferenceSet) {
+    resetYawReference();
+    return 0.0;
+  }
+  
+  // 自動リセット機能（長期ドリフト対策）
+  unsigned long currentTime = millis();
+  if (currentTime - yawResetTime > YAW_RESET_INTERVAL) {
+    // 30秒経過し、かつロボットが静止している場合のみリセット
+    if (abs(getAngularVelocityZDegrees()) < 2.0) { // 2度/秒以下で静止とみなす
+      Serial.println("Auto-resetting yaw reference (drift compensation)");
+      resetYawReference();
+      return 0.0;
+    }
+  }
+  
+  // 相対角度を計算（-180 ~ +180度に正規化）
+  float relativeYaw = normalizeYaw(currentYaw - yawOffsetDegrees);
+  return relativeYaw;
+}
+
+void GyroSensor::resetYawReference() {
+  // 現在のヨー角を基準値として設定
+  yawOffsetDegrees = getYaw();
+  yawReferenceSet = true;
+  yawResetTime = millis();
+  
+  // Serial.print("Yaw reference reset to: ");
+  // Serial.print(yawOffsetDegrees, 2);
+  // Serial.println(" degrees");
+}
+
+float GyroSensor::getPitch() {
+  // オイラー角（ピッチ角）を取得 [度]
+  imu::Vector<3> euler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+  return euler.y(); // ピッチ角（度）
+}
+
+float GyroSensor::getRoll() {
+  // オイラー角（ロール角）を取得 [度]
+  imu::Vector<3> euler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+  return euler.z(); // ロール角（度）
 }
 
 bool GyroSensor::isTurning(float threshold) {
@@ -175,6 +239,11 @@ void GyroSensor::reset() {
   filteredAngularVelocityZ = 0.0;
   calibrationComplete = false;
   
+  // ヨー角基準値もリセット
+  yawOffsetDegrees = 0.0;
+  yawReferenceSet = false;
+  yawResetTime = 0;
+  
   Serial.println("Gyro sensor reset completed.");
 }
 
@@ -218,4 +287,15 @@ bool GyroSensor::checkSensorStatus() {
     Serial.println("WARNING: Gyroscope needs calibration!");
     return false;
   }
+}
+
+float GyroSensor::normalizeYaw(float yaw) {
+  // ヨー角を -180 ~ +180度の範囲に正規化
+  while (yaw > 180.0) {
+    yaw -= 360.0;
+  }
+  while (yaw < -180.0) {
+    yaw += 360.0;
+  }
+  return yaw;
 }

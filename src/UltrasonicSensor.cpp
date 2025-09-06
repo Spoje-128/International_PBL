@@ -64,7 +64,7 @@ bool UltrasonicSensor::isObstacleDetected(float threshold) {
   float right = currentRightDistance;
 
   // いずれかのセンサーで閾値以下の距離を検出した場合、障害物ありと判定
-  bool obstacleDetected = (left <= threshold || center <= threshold || right <= threshold || left == 400.0 || center == 400.0 || right == 400.0);
+  bool obstacleDetected = (left <= threshold || center <= threshold || right <= threshold);
 
   if (obstacleDetected) {
     Serial.println("*** OBSTACLE DETECTED ***");

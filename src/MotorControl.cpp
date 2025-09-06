@@ -23,9 +23,10 @@ MotorControl::MotorControl() {
   // PID制御パラメータ（要調整）
   // 二重PID問題を解消するため、ゲインを現実的な値に見直し。
   // The gain is reviewed to a realistic value to eliminate the dual PID problem.
-  angularKp = 10.0;        // 比例ゲイン / Proportional gain
+  // スピンを防ぐためにゲインを大幅に下げる
+  angularKp = 2.0;        // 比例ゲイン（8.0→2.0に減少）/ Proportional gain
   angularKi = 0.0;         // 積分ゲイン / Integral gain
-  angularKd = 2.0;        // 微分ゲイン / Derivative gain
+  angularKd = 0.5;        // 微分ゲイン（1.0→0.5に減少）/ Derivative gain
   angularErrorSum = 0.0;
   angularLastError = 0.0;
   lastPidUpdate = 0;
@@ -195,25 +196,25 @@ void MotorControl::setGyroSensor(GyroSensor* gyro) {
 void MotorControl::moveWithAngularVelocity(float linearSpeed, float targetAngularVel) {
   // 新しい目標が設定されたら、PIDの状態をリセットする
   // Reset PID state when a new target is set
-  if (targetAngularVelocity != targetAngularVel || currentLinearSpeed != linearSpeed) {
-      angularErrorSum = 0.0;
-      angularLastError = 0.0;
-      lastPidUpdate = 0;
-  }
+  // if (targetAngularVelocity != targetAngularVel || currentLinearSpeed != linearSpeed) {
+  //     angularErrorSum = 0.0;
+  //     angularLastError = 0.0;
+  //     lastPidUpdate = 0;
+  // }
 
   targetAngularVelocity = targetAngularVel;
   currentLinearSpeed = linearSpeed;
   angularControlActive = true;
   
-  Serial.print("Angular control activated - Target: ");
-  Serial.print(targetAngularVelocity, 2);
-  Serial.print(" deg/s, Linear: ");
-  Serial.println(currentLinearSpeed);
+  // Serial.print("Angular control activated - Target: ");
+  // Serial.print(targetAngularVelocity, 2);
+  // Serial.print(" deg/s, Linear: ");
+  // Serial.println(currentLinearSpeed);
 }
 
 void MotorControl::turnAtAngularVelocity(float targetAngularVel) {
-  // その場旋回（linearSpeed = 0）
-  moveWithAngularVelocity(0.0, targetAngularVel);
+  // その場旋回に基本速度を追加（linearSpeed = BASE_TURN_SPEED）
+  moveWithAngularVelocity(BASE_TURN_SPEED, targetAngularVel);
 }
 
 void MotorControl::moveStraight(float linearSpeed) {
@@ -235,7 +236,8 @@ void MotorControl::updateAngularControl() {
   // 現在の角速度を取得
   float currentAngularVel = gyroSensor->getAngularVelocityZDegrees();
   Serial.print("Current Angular Velocity: ");
-  Serial.println(currentAngularVel);
+  Serial.print(currentAngularVel);
+  Serial.print(", ");
   
   // PID制御で補正値を計算
   float correction = angularPIDControl(targetAngularVelocity, currentAngularVel);
@@ -244,9 +246,9 @@ void MotorControl::updateAngularControl() {
   int baseLeftSpeed, baseRightSpeed;
   calculateWheelSpeeds(currentLinearSpeed, targetAngularVelocity, baseLeftSpeed, baseRightSpeed);
   
-  // フィードバック補正を適用
-  int correctedLeftSpeed = constrain(baseLeftSpeed - (int)correction, -255, 255);
-  int correctedRightSpeed = constrain(baseRightSpeed + (int)correction, -255, 255);
+  // フィードバック補正を適用（符号を修正）
+  int correctedLeftSpeed = constrain(baseLeftSpeed + (int)correction, -255, 255);   // 符号を逆転
+  int correctedRightSpeed = constrain(baseRightSpeed - (int)correction, -255, 255); // 符号を逆転
   
   // モーター制御（符号で方向、絶対値でPWM速度）
   if (correctedLeftSpeed >= 0) {
@@ -271,7 +273,8 @@ void MotorControl::updateAngularControl() {
   Serial.print(", L: ");
   Serial.print(correctedLeftSpeed);
   Serial.print(", R: ");
-  Serial.println(correctedRightSpeed);
+  Serial.print(correctedRightSpeed);
+  Serial.print(", ");
 }
 
 void MotorControl::setRobotParameters(float wheelbase, float wheelRadius) {
@@ -286,22 +289,30 @@ void MotorControl::setRobotParameters(float wheelbase, float wheelRadius) {
 }
 
 void MotorControl::calculateWheelSpeeds(float linearSpeed, float angularVelocityDeg, int& leftSpeed, int& rightSpeed) {
-  // 角速度をrad/sに変換
-  float angularVelocityRad = angularVelocityDeg * PI / 180.0;
+  // 机上テスト用の簡単なスケーリング
+  // Simple scaling for desktop testing
   
-  // 差動2輪ロボットの運動学
-  // v_left = v_linear - (wheelbase/2) * angular_velocity
-  // v_right = v_linear + (wheelbase/2) * angular_velocity
+  // 前進速度をそのままPWMベース値として使用
+  int basePWM = (int)linearSpeed;
   
-  float wheelSpeedLeft = linearSpeed - (robotWheelbase / 2.0) * angularVelocityRad;
-  float wheelSpeedRight = linearSpeed + (robotWheelbase / 2.0) * angularVelocityRad;
+  // 角速度補正値を計算（deg/s → PWM差）
+  // スピンを防ぐため、1deg/s あたり 2PWM の差に戻す
+  int angularPWM = (int)(angularVelocityDeg * 2.0);
   
-  // 車輪速度をPWM値に変換（簡単なスケーリング）
-  // 基準：30deg/s → BASE_TURN_SPEED PWM
-  float speedScale = BASE_TURN_SPEED / (NOMINAL_TURN_RATE * PI / 180.0 * robotWheelRadius);
+  // 左右のPWM値を計算
+  leftSpeed = basePWM - angularPWM;   // 正の角速度で左が遅く
+  rightSpeed = basePWM + angularPWM;  // 正の角速度で右が速く
   
-  leftSpeed = constrain((int)(wheelSpeedLeft * speedScale), -255, 255);
-  rightSpeed = constrain((int)(wheelSpeedRight * speedScale), -255, 255);
+  // デッドバンド保証：PWM値が小さすぎる場合は最低値を設定
+  const int MIN_PWM = 100;  // モーターのデッドバンドを超える最低PWM値
+  if (leftSpeed > 0 && leftSpeed < MIN_PWM) leftSpeed = MIN_PWM;
+  if (leftSpeed < 0 && leftSpeed > -MIN_PWM) leftSpeed = -MIN_PWM;
+  if (rightSpeed > 0 && rightSpeed < MIN_PWM) rightSpeed = MIN_PWM;
+  if (rightSpeed < 0 && rightSpeed > -MIN_PWM) rightSpeed = -MIN_PWM;
+  
+  // 制限
+  leftSpeed = constrain(leftSpeed, -255, 255);
+  rightSpeed = constrain(rightSpeed, -255, 255);
 }
 
 float MotorControl::angularPIDControl(float targetAngular, float currentAngular) {
@@ -331,5 +342,24 @@ float MotorControl::angularPIDControl(float targetAngular, float currentAngular)
   float output = (angularKp * error) + (angularKi * angularErrorSum) + (angularKd * derivative);
   
   return constrain(output, -150.0, 150.0); // PWM補正値の制限を緩和
+}
+
+// テスト用の直接モーター制御関数
+void MotorControl::testTurnLeftDirect(int pwmValue) {
+  Serial.print("Direct LEFT test - PWM: ");
+  Serial.println(pwmValue);
+  
+  // 左旋回: 左輪後進、右輪前進
+  leftWheelBackward(pwmValue);
+  rightWheelForward(pwmValue);
+}
+
+void MotorControl::testTurnRightDirect(int pwmValue) {
+  Serial.print("Direct RIGHT test - PWM: ");
+  Serial.println(pwmValue);
+  
+  // 右旋回: 左輪前進、右輪後進
+  leftWheelForward(pwmValue);
+  rightWheelBackward(pwmValue);
 }
 

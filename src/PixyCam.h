@@ -7,7 +7,7 @@ class PixyCam {
 public:
   PixyCam();
   void init();
-  int32_t getXOffset();
+  int32_t getXOffset(uint8_t signature);
 
 private:
   Pixy2 pixy;
