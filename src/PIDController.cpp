@@ -1,30 +1,44 @@
 #include "PIDController.h"
-#include <Arduino.h>
 
-PIDController::PIDController(float Kp, float Ki, float Kd) {
-  kp = Kp;
-  ki = Ki;
-  kd = Kd;
-  integral = 0;
-  previous_error = 0;
-  previous_time = millis();
+PIDController::PIDController(float kp, float ki, float kd) {
+  setGains(kp, ki, kd);
+  reset();
 }
 
-float PIDController::calculate(float setpoint, float currentValue) {
-  unsigned long current_time = millis();
-  float dt = (current_time - previous_time) / 1000.0;
-  previous_time = current_time;
-
-  float error = setpoint - currentValue;
-  integral += error * dt;
-  float derivative = (error - previous_error) / dt;
-  previous_error = error;
-
-  return kp * error + ki * integral + kd * derivative;
+void PIDController::setGains(float p, float i, float d) {
+  kp = p;
+  ki = i;
+  kd = d;
 }
 
 void PIDController::reset() {
-  integral = 0;
-  previous_error = 0;
-  previous_time = millis();
+  integralError = 0;
+  lastError = 0;
+  lastTime = 0;
+}
+
+float PIDController::calculate(float error) {
+  unsigned long currentTime = millis();
+  float dt = (lastTime > 0) ? (float)(currentTime - lastTime) / 1000.0 : 0;
+
+  // To prevent instability on the first run or after a long pause
+  if (dt <= 0 || dt > 0.5) {
+    dt = 0;
+  }
+
+  // Integral term (with anti-windup)
+  integralError += error * dt;
+  // A generic anti-windup limit. This might need tuning.
+  integralError = constrain(integralError, -250, 250);
+
+  // Derivative term
+  float derivative = (dt > 0) ? (error - lastError) / dt : 0;
+
+  // Update state for next calculation
+  lastError = error;
+  lastTime = currentTime;
+
+  // PID calculation
+  float output = (kp * error) + (ki * integralError) + (kd * derivative);
+  return output;
 }
