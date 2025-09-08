@@ -3,19 +3,15 @@
 
 #include <Pixy2.h>
 
-// A struct to hold information about a detected block
-struct Block {
-  uint16_t signature;
-  uint16_t x;
-  uint16_t y;
-  uint16_t width;
-  uint16_t height;
-  int16_t  age; // How many frames the block has been tracked
-  int16_t  index; // The block's index in the pixy.ccc.blocks[] array
-};
+// NOTE: The 'Block' struct is defined within the Pixy2 library (Pixy2CCC.h).
+// We will use that definition directly.
 
 class PixyCam {
 public:
+  // Public constants for access from main.cpp
+  static const int PIXY_FRAME_WIDTH = 316;
+  static const int PIXY_FRAME_HEIGHT = 208;
+
   PixyCam();
   void init();
 
@@ -26,10 +22,6 @@ public:
 
 private:
   Pixy2 pixy;
-
-  // Pixy2 camera resolution constants
-  static const int PIXY_FRAME_WIDTH = 316;
-  static const int PIXY_FRAME_HEIGHT = 208;
 };
 
 #endif // PIXY_CAM_H

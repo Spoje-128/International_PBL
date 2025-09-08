@@ -6,7 +6,7 @@ const float SOUND_SPEED_CM_US = 0.0343;
 // The key is that it prevents pulseIn from blocking forever if no echo is received.
 const unsigned long SENSOR_TIMEOUT_US = 20000;
 
-UltrasonicSensor::UltrasonicSensor() {}
+UltrasonicSensor::UltrasonicSensor() : filteredLeft(0), filteredCenter(0), filteredRight(0) {}
 
 void UltrasonicSensor::init() {
   pinMode(LEFT_TRIG_PIN, OUTPUT);
@@ -15,16 +15,34 @@ void UltrasonicSensor::init() {
   pinMode(CENTER_ECHO_PIN, INPUT);
   pinMode(RIGHT_TRIG_PIN, OUTPUT);
   pinMode(RIGHT_ECHO_PIN, INPUT);
-  Serial.println("UltrasonicSensor Initialized (Fast-Blocking)");
+  Serial.println("UltrasonicSensor Initialized (Fast-Blocking with LPF)");
 }
 
 void UltrasonicSensor::readDistances(float& left, float& center, float& right) {
-  // Read each sensor sequentially. A small delay between pings prevents interference.
-  left = measureDistance(LEFT_TRIG_PIN, LEFT_ECHO_PIN);
+  // 1. Read raw distances
+  float rawLeft = measureDistance(LEFT_TRIG_PIN, LEFT_ECHO_PIN);
   delay(1);
-  center = measureDistance(CENTER_TRIG_PIN, CENTER_ECHO_PIN);
+  float rawCenter = measureDistance(CENTER_TRIG_PIN, CENTER_ECHO_PIN);
   delay(1);
-  right = measureDistance(RIGHT_TRIG_PIN, RIGHT_ECHO_PIN);
+  float rawRight = measureDistance(RIGHT_TRIG_PIN, RIGHT_ECHO_PIN);
+
+  // 2. Apply Low-Pass Filter
+  // If the sensor times out (returns 0), we don't want to drag the filtered value to 0.
+  // Instead, we just keep the previous filtered value.
+  if (rawLeft > 0) {
+    filteredLeft = (LPF_ALPHA * rawLeft) + ((1.0 - LPF_ALPHA) * filteredLeft);
+  }
+  if (rawCenter > 0) {
+    filteredCenter = (LPF_ALPHA * rawCenter) + ((1.0 - LPF_ALPHA) * filteredCenter);
+  }
+  if (rawRight > 0) {
+    filteredRight = (LPF_ALPHA * rawRight) + ((1.0 - LPF_ALPHA) * filteredRight);
+  }
+
+  // 3. Return the filtered values
+  left = filteredLeft;
+  center = filteredCenter;
+  right = filteredRight;
 }
 
 float UltrasonicSensor::measureDistance(int trigPin, int echoPin) {

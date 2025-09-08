@@ -8,7 +8,7 @@ public:
   UltrasonicSensor();
   void init();
 
-  // Reads all three sensors sequentially.
+  // Reads all three sensors sequentially and applies a Low-Pass Filter.
   // This is a blocking function, but uses a short timeout to keep the loop fast.
   void readDistances(float& left, float& center, float& right);
 
@@ -20,6 +20,14 @@ private:
   static const int CENTER_ECHO_PIN = 21;
   static const int RIGHT_TRIG_PIN = A1;
   static const int RIGHT_ECHO_PIN = A0;
+
+  // Low-Pass Filter (LPF) constant
+  static constexpr float LPF_ALPHA = 0.6; // Higher alpha = more responsive, less filtering
+
+  // Variables to store the previous filtered distance for the LPF
+  float filteredLeft;
+  float filteredCenter;
+  float filteredRight;
 
   // Helper function to measure distance with a timeout
   float measureDistance(int trigPin, int echoPin);
