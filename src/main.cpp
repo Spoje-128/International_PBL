@@ -137,6 +137,18 @@ void loop() {
     }
   }
   else {
+    // Dead-end / head-on wall detection
+    if ((centerDist > 0 && centerDist < 20) && (leftDist > 0 && leftDist < 15) && (rightDist > 0 && rightDist < 15)) {
+      robotState = "DEAD_END_TURN";
+      motors.backward(TURN_SPEED);
+      delay(500);
+      motors.turnLeft(TURN_SPEED); // Perform a long turn to escape
+      delay(1000);
+      motors.stop();
+      pidController.reset();
+      return;
+    }
+
     pidController.reset();
     int leftSpeed = SEARCH_SPEED;
     int rightSpeed = SEARCH_SPEED;
