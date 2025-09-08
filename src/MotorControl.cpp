@@ -84,9 +84,22 @@ void MotorControl::leftWheelStop() {
 void MotorControl::stop() {
   leftWheelStop();
   rightWheelStop();
+  currentLeftSpeed = 0;
+  currentRightSpeed = 0;
+}
+
+int MotorControl::getLeftSpeed() const {
+  return currentLeftSpeed;
+}
+
+int MotorControl::getRightSpeed() const {
+  return currentRightSpeed;
 }
 
 void MotorControl::setSpeeds(int left_pwm, int right_pwm) {
+  currentLeftSpeed = left_pwm;
+  currentRightSpeed = right_pwm;
+
   // Handle left motor
   if (left_pwm > 0) {
     leftWheelForward(constrain(left_pwm, 0, 255));

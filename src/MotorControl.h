@@ -14,8 +14,13 @@ public:
   void turnRight(int speed);
   void stop();
   void setMotorDirection(bool rightReversed, bool leftReversed);
+  int getLeftSpeed() const;
+  int getRightSpeed() const;
 
 private:
+  int currentLeftSpeed = 0;
+  int currentRightSpeed = 0;
+
   // Pin definitions for L298N motor driver
   static const int ENA = 9;   // Right wheel speed (PWM)
   static const int ENB = 10;  // Left wheel speed (PWM)
