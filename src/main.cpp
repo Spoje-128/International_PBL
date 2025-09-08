@@ -24,6 +24,12 @@ const int MAX_SPEED = 255;
 const float COLLISION_THRESHOLD_FRONT = 15.0;
 const float COLLISION_THRESHOLD_SIDE = 10.0;
 
+// Wall Following
+const float WALL_TARGET_DISTANCE = 15.0; // Target perpendicular distance from wall (cm)
+const float WALL_DETECT_THRESHOLD = 40.0; // Max distance to consider a wall reading valid
+const float WALL_FOLLOW_KP = 2.5; // Proportional gain for wall following
+const float SIN_26_5_DEG = 0.4462; // sin(26.5 deg)
+
 // PIXY - Target Tracking
 const uint8_t TARGET_SIGNATURE = 1;
 const int PIXY_CENTER_X = PixyCam::PIXY_FRAME_WIDTH / 2;
@@ -154,25 +160,57 @@ void loop() {
     }
   }
 
-  // --- Behavior 3: Search Mode ---
+  // --- Behavior 3: Search / Wall Following ---
   else {
-    Serial.println("--- SEARCHING ---");
-    // Simple search: move forward and turn left/right periodically
-    motors.forward(SEARCH_SPEED);
+    float perp_dist_L = leftDist * SIN_26_5_DEG;
+    float perp_dist_R = rightDist * SIN_26_5_DEG;
 
-    if (millis() - lastActionTime > SEARCH_TURN_DURATION) {
-      if (searchingLeft) {
-        Serial.println("Searching: Turning left");
-        motors.turnLeft(SEARCH_SPEED);
-      } else {
-        Serial.println("Searching: Turning right");
-        motors.turnRight(SEARCH_SPEED);
-      }
-      // Invert the search direction for next time
-      searchingLeft = !searchingLeft;
-      lastActionTime = millis();
-      // Let it turn for a bit
-      delay(500);
+    bool leftWallDetected = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
+    bool rightWallDetected = (rightDist > 0 && rightDist < WALL_DETECT_THRESHOLD);
+
+    int correction = 0;
+
+    if (leftWallDetected && !rightWallDetected) {
+      // Follow left wall
+      Serial.println("--- FOLLOWING LEFT WALL ---");
+      float error = WALL_TARGET_DISTANCE - perp_dist_L;
+      correction = (int)(WALL_FOLLOW_KP * error);
+    } else if (!leftWallDetected && rightWallDetected) {
+      // Follow right wall
+      Serial.println("--- FOLLOWING RIGHT WALL ---");
+      float error = perp_dist_R - WALL_TARGET_DISTANCE;
+      correction = (int)(WALL_FOLLOW_KP * error);
+    } else if (leftWallDetected && rightWallDetected) {
+        // Center between two walls
+        Serial.println("--- CENTERING BETWEEN WALLS ---");
+        float error = perp_dist_R - perp_dist_L; // if positive, too close to left wall
+        correction = (int)(WALL_FOLLOW_KP * error * 0.5); // use smaller gain for centering
     }
+    else {
+      // No walls detected, perform simple search pattern
+      Serial.println("--- SEARCHING (NO WALLS) ---");
+      // Move forward while turning periodically
+      motors.forward(SEARCH_SPEED);
+      if (millis() - lastActionTime > SEARCH_TURN_DURATION) {
+        if (searchingLeft) {
+          motors.turnLeft(SEARCH_SPEED);
+        } else {
+          motors.turnRight(SEARCH_SPEED);
+        }
+        searchingLeft = !searchingLeft;
+        lastActionTime = millis();
+        delay(500);
+      }
+      return; // exit loop here since motor command was sent
+    }
+
+    // Apply correction for wall following
+    int leftSpeed = SEARCH_SPEED - correction;
+    int rightSpeed = SEARCH_SPEED + correction;
+
+    leftSpeed = constrain(leftSpeed, 130, MAX_SPEED);
+    rightSpeed = constrain(rightSpeed, 130, MAX_SPEED);
+
+    motors.setSpeeds(leftSpeed, rightSpeed);
   }
 }
