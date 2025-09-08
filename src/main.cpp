@@ -6,18 +6,19 @@
 #include "PIDController.h"
 
 // --- Tuning Constants ---
-const int SEARCH_SPEED = 140;
-const int TRACKING_BASE_SPEED = 160;
-const int TURN_SPEED = 150;
+const int SEARCH_SPEED = 160;
+const int TRACKING_BASE_SPEED = 150;
+const int TURN_SPEED = 160;
 const int MAX_SPEED = 255;
 
-const float COLLISION_THRESHOLD_FRONT_DEFAULT = 12.0;
-const float COLLISION_THRESHOLD_FRONT_TRACKING = 4.0;
-const float COLLISION_THRESHOLD_SIDE = 7.0;
+const float COLLISION_THRESHOLD_FRONT_DEFAULT = 2.0;
+const float COLLISION_THRESHOLD_FRONT_TRACKING = 2.0;
+const float COLLISION_THRESHOLD_SIDE_DEFAULT = 2.0;
+const float COLLISION_THRESHOLD_SIDE_TRACKING = 2.0;
 
-const float SEARCH_WALL_DETECT_THRESHOLD = 35.0;
-const float SEARCH_WALL_TARGET_DISTANCE = 15.0;
-const float SEARCH_KP = 2.5; // P-gain for wall following
+const float SEARCH_WALL_DETECT_THRESHOLD = 50.0;
+const float SEARCH_WALL_TARGET_DISTANCE = 7.0;
+const float SEARCH_KP = 23.0; // P-gain for wall following
 const float SIN_26_5_DEG = 0.4462;
 
 const uint8_t TARGET_SIGNATURE = 1;
@@ -25,9 +26,9 @@ const int PIXY_CENTER_X = PixyCam::PIXY_FRAME_WIDTH / 2;
 const int TARGET_DEADZONE_X = 20;
 const int TARGET_ATTACK_AREA = 12000;
 
-float KP = 0.4;
-float KI = 0.02;
-float KD = 0.1;
+float KP = 3.0;
+float KI = 0.0;
+float KD = 0.0;
 
 // --- Global Objects ---
 MotorControl motors;
@@ -89,7 +90,9 @@ void loop() {
 
 bool handleCollision(float l, float c, float r, bool targetVisible) {
   float front_thresh = targetVisible ? COLLISION_THRESHOLD_FRONT_TRACKING : COLLISION_THRESHOLD_FRONT_DEFAULT;
-  if ((c > 0 && c < front_thresh) || (l > 0 && l < COLLISION_THRESHOLD_SIDE) || (r > 0 && r < COLLISION_THRESHOLD_SIDE)) {
+  float side_thresh = targetVisible ? COLLISION_THRESHOLD_SIDE_TRACKING : COLLISION_THRESHOLD_SIDE_DEFAULT;
+  
+  if ((c > 0 && c < front_thresh) || (l > 0 && l < side_thresh) || (r > 0 && r < side_thresh)) {
     debugState = "AVOIDING";
     motors.stop();
     motors.backward(TURN_SPEED);
@@ -140,7 +143,7 @@ void handleSearching(float l, float c, float r) {
   pidController.reset();
   pixy.resetTracking();
 
-  bool frontWall = (c > 0 && c < SEARCH_WALL_DETECT_THRESHOLD);
+  bool frontWall = (c > 0 && c < SEARCH_WALL_DETECT_THRESHOLD / 2.0);
   bool leftWall = (l > 0 && l < SEARCH_WALL_DETECT_THRESHOLD);
   bool rightWall = (r > 0 && r < SEARCH_WALL_DETECT_THRESHOLD);
 
@@ -149,8 +152,13 @@ void handleSearching(float l, float c, float r) {
 
   if (frontWall) {
     debugState = "SEARCH (AVOID FRONT)";
-    leftSpeed = -TURN_SPEED; // Turn right
-    rightSpeed = TURN_SPEED;
+    if (l > SEARCH_WALL_TARGET_DISTANCE) {
+        leftSpeed = -255; // Turn left
+        rightSpeed = 255;
+        } else {
+        leftSpeed = 255; // Turn right
+        rightSpeed = -255;
+        }
   } else if (leftWall && rightWall) {
     debugState = "SEARCH (CENTERING)";
     float error = (r * SIN_26_5_DEG) - (l * SIN_26_5_DEG);
@@ -172,7 +180,7 @@ void handleSearching(float l, float c, float r) {
   } else {
     debugState = "SEARCH (OPEN SPACE)";
     leftSpeed = TURN_SPEED; // Spin to find a wall
-    rightSpeed = -TURN_SPEED;
+    rightSpeed = TURN_SPEED + 30;
   }
 
   motors.setSpeeds(constrain(leftSpeed, -MAX_SPEED, MAX_SPEED), constrain(rightSpeed, -MAX_SPEED, MAX_SPEED));
@@ -202,12 +210,17 @@ void handleSerialTuning() {
 }
 
 void printDebugInfo(float l, float c, float r, bool targetVisible, float f_thresh) {
+    float side_thresh = targetVisible ? COLLISION_THRESHOLD_SIDE_TRACKING : COLLISION_THRESHOLD_SIDE_DEFAULT;
     Serial.print("State: "); Serial.print(debugState);
     Serial.print(" | Ultra (L,C,R): ");
     Serial.print(l, 0); Serial.print(", ");
     Serial.print(c, 0); Serial.print(", ");
     Serial.print(r, 0);
-    Serial.print(" | F_Thresh: "); Serial.print(f_thresh, 1);
+    Serial.print(" | Thresh F/S: "); Serial.print(f_thresh, 1);
+    Serial.print("/"); Serial.print(side_thresh, 1);
+    Serial.print(" | PWM (L,R): ");
+    Serial.print(motors.getLeftPWM()); Serial.print(",");
+    Serial.print(motors.getRightPWM());
     if (debugState == "TRACKING") {
         Serial.print(" | Target(X,A): ");
         Serial.print(targetBlock.m_x); Serial.print(", ");

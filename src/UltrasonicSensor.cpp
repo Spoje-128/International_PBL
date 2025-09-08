@@ -26,6 +26,11 @@ void UltrasonicSensor::readDistances(float& left, float& center, float& right) {
   delay(1);
   float rawRight = measureDistance(RIGHT_TRIG_PIN, RIGHT_ECHO_PIN);
 
+  // Serial.print("Raw Distances (L,C,R): ");
+  // Serial.print(rawLeft, 1); Serial.print(", ");
+  // Serial.print(rawCenter, 1); Serial.print(", ");
+  // Serial.print(rawRight, 1); Serial.println();
+
   // 2. Apply Low-Pass Filter
   // If the sensor times out (returns 0), we don't want to drag the filtered value to 0.
   // Instead, we just keep the previous filtered value.
@@ -46,6 +51,16 @@ void UltrasonicSensor::readDistances(float& left, float& center, float& right) {
 }
 
 float UltrasonicSensor::measureDistance(int trigPin, int echoPin) {
+  // Ensure minimum interval between sensor readings
+  static unsigned long lastMeasurementTime = 0;
+  const unsigned long MIN_MEASUREMENT_INTERVAL_MS = 50; // 50ms minimum interval
+  
+  unsigned long currentTime = millis();
+  if (currentTime - lastMeasurementTime < MIN_MEASUREMENT_INTERVAL_MS) {
+    delay(MIN_MEASUREMENT_INTERVAL_MS - (currentTime - lastMeasurementTime));
+  }
+  lastMeasurementTime = millis();
+  
   // Send the trigger pulse
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
