@@ -21,13 +21,14 @@ const int TRACKING_BASE_SPEED = 160;
 const int TURN_SPEED = 150;
 const int MAX_SPEED = 255;
 
-// Distances (in cm) - Reduced for narrow maps
-const float COLLISION_THRESHOLD_FRONT = 10.0;
+// Distances (in cm)
+const float COLLISION_THRESHOLD_FRONT_DEFAULT = 10.0;
+const float COLLISION_THRESHOLD_FRONT_TRACKING = 3.0; // Allow getting closer to the target
 const float COLLISION_THRESHOLD_SIDE = 7.0;
 
 // Wall Following
-const float WALL_TARGET_DISTANCE = 12.0; // Target perpendicular distance from wall (cm)
-const float WALL_DETECT_THRESHOLD = 35.0; // Max distance to consider a wall reading valid
+const float WALL_TARGET_DISTANCE = 12.0;
+const float WALL_DETECT_THRESHOLD = 35.0;
 const float WALL_FOLLOW_KP = 2.5;
 const float SIN_26_5_DEG = 0.4462;
 
@@ -37,7 +38,7 @@ const int PIXY_CENTER_X = PixyCam::PIXY_FRAME_WIDTH / 2;
 const int TARGET_DEADZONE_X = 20;
 const int TARGET_ATTACK_AREA = 12000;
 
-// PID gains for steering correction - now variables to allow for tuning
+// PID gains for steering correction
 float KP = 0.4;
 float KI = 0.02;
 float KD = 0.1;
@@ -51,18 +52,15 @@ Block targetBlock;
 PIDController pidController(KP, KI, KD);
 
 // --- State/Timing Variables ---
-unsigned long lastSearchTurnTime = 0;
-const unsigned long SEARCH_TURN_INTERVAL = 1500;
-bool searchingLeft = true;
-String robotState = "STARTING"; // For debugging
+String robotState = "STARTING";
 
 // --- Debugging ---
 unsigned long lastDebugPrintTime = 0;
-const unsigned long DEBUG_PRINT_INTERVAL = 500; // ms
+const unsigned long DEBUG_PRINT_INTERVAL = 500;
 
 // --- Function Prototypes ---
 void handleSerialTuning();
-void printDebugInfo(float l, float c, float r, bool targetVisible);
+void printDebugInfo(float l, float c, float r, bool targetVisible, float front_thresh);
 
 // --- Setup ---
 void setup() {
@@ -87,7 +85,11 @@ void loop() {
   ultrasonic.readDistances(leftDist, centerDist, rightDist);
   bool targetVisible = pixy.getBestBlock(TARGET_SIGNATURE, targetBlock);
 
-  if ((centerDist > 0 && centerDist < COLLISION_THRESHOLD_FRONT) ||
+  // Dynamically adjust front collision threshold if a target is visible
+  float current_front_threshold = targetVisible ? COLLISION_THRESHOLD_FRONT_TRACKING : COLLISION_THRESHOLD_FRONT_DEFAULT;
+
+  // --- Behavior 1: Collision Avoidance (Highest Priority) ---
+  if ((centerDist > 0 && centerDist < current_front_threshold) ||
       (leftDist > 0 && leftDist < COLLISION_THRESHOLD_SIDE) ||
       (rightDist > 0 && rightDist < COLLISION_THRESHOLD_SIDE)) {
 
@@ -106,6 +108,7 @@ void loop() {
     pidController.reset();
     return;
   }
+  // --- Behavior 2: Target Tracking and Attack ---
   else if (targetVisible) {
     int area = targetBlock.m_width * targetBlock.m_height;
 
@@ -136,59 +139,36 @@ void loop() {
       motors.setSpeeds(leftSpeed, rightSpeed);
     }
   }
+  // --- Behavior 3: Search / Wall Following (Lowest Priority) ---
   else {
     pidController.reset();
     int leftSpeed = SEARCH_SPEED;
     int rightSpeed = SEARCH_SPEED;
 
-    if (millis() - lastSearchTurnTime > SEARCH_TURN_INTERVAL) {
-        lastSearchTurnTime = millis();
-        searchingLeft = !searchingLeft;
-        robotState = "SEARCH (TURN)";
-        if (searchingLeft) {
-            leftSpeed = -TURN_SPEED;
-            rightSpeed = TURN_SPEED;
-        } else {
-            leftSpeed = TURN_SPEED;
-            rightSpeed = -TURN_SPEED;
-        }
-    }
-    else {
-        bool isMovingForward = (leftSpeed == rightSpeed);
-        if(isMovingForward) {
-            float perp_dist_L = leftDist * SIN_26_5_DEG;
-            float perp_dist_R = rightDist * SIN_26_5_DEG;
-            bool leftWall = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
-            bool rightWall = (rightDist > 0 && rightDist < WALL_DETECT_THRESHOLD);
-            int correction = 0;
+    bool leftWall = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
 
-            if (leftWall && !rightWall) {
-                robotState = "WALL_FOLLOW_L";
-                float error = WALL_TARGET_DISTANCE - perp_dist_L;
-                correction = (int)(WALL_FOLLOW_KP * error);
-            } else if (!leftWall && rightWall) {
-                robotState = "WALL_FOLLOW_R";
-                float error = perp_dist_R - WALL_TARGET_DISTANCE;
-                correction = (int)(WALL_FOLLOW_KP * error);
-            } else if (leftWall && rightWall) {
-                robotState = "CENTERING";
-                float error = perp_dist_R - perp_dist_L;
-                correction = (int)(WALL_FOLLOW_KP * error * 0.5);
-            } else {
-                robotState = "SEARCH (FWD)";
-            }
-            leftSpeed -= correction;
-            rightSpeed += correction;
-        }
+    if (leftWall) {
+        // "Left-hand rule": always prioritize following the left wall.
+        robotState = "WALL_FOLLOW_L";
+        float perp_dist_L = leftDist * SIN_26_5_DEG;
+        float error = WALL_TARGET_DISTANCE - perp_dist_L;
+        int correction = (int)(WALL_FOLLOW_KP * error);
+        leftSpeed -= correction;
+        rightSpeed += correction;
+    } else {
+        // No left wall found, turn right to find one.
+        robotState = "SEARCH (FIND WALL)";
+        leftSpeed = TURN_SPEED;
+        rightSpeed = -TURN_SPEED; // Turn right
     }
+
     int finalLeft = constrain(leftSpeed, -MAX_SPEED, MAX_SPEED);
     int finalRight = constrain(rightSpeed, -MAX_SPEED, MAX_SPEED);
     motors.setSpeeds(finalLeft, finalRight);
   }
 
-  // Rate-limited debug printing
   if (millis() - lastDebugPrintTime > DEBUG_PRINT_INTERVAL) {
-    printDebugInfo(leftDist, centerDist, rightDist, targetVisible);
+    printDebugInfo(leftDist, centerDist, rightDist, targetVisible, current_front_threshold);
     lastDebugPrintTime = millis();
   }
 }
@@ -203,18 +183,10 @@ void handleSerialTuning() {
     float value = input.substring(1).toFloat();
 
     switch (gainType) {
-      case 'p': case 'P':
-        KP = value;
-        break;
-      case 'i': case 'I':
-        KI = value;
-        break;
-      case 'd': case 'D':
-        KD = value;
-        break;
-      default:
-        Serial.println("Invalid gain type. Use 'p', 'i', or 'd'.");
-        return;
+      case 'p': case 'P': KP = value; break;
+      case 'i': case 'I': KI = value; break;
+      case 'd': case 'D': KD = value; break;
+      default: Serial.println("Invalid gain type."); return;
     }
     pidController.setGains(KP, KI, KD);
     pidController.reset();
@@ -224,12 +196,13 @@ void handleSerialTuning() {
   }
 }
 
-void printDebugInfo(float l, float c, float r, bool targetVisible) {
+void printDebugInfo(float l, float c, float r, bool targetVisible, float front_thresh) {
     Serial.print("State: "); Serial.print(robotState);
     Serial.print(" | Ultra (L,C,R): ");
     Serial.print(l, 0); Serial.print(", ");
     Serial.print(c, 0); Serial.print(", ");
     Serial.print(r, 0);
+    Serial.print(" | Front Thresh: "); Serial.print(front_thresh, 1);
 
     if (robotState == "TRACKING") {
         Serial.print(" | Target (X,Area): ");
