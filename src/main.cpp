@@ -1,4 +1,13 @@
 #include <Arduino.h>
+
+// ====================================================================================
+// !! WARNING !!
+// Per user instruction, this code is configured to use pins 0 and 1 for the left
+// ultrasonic sensor. These are the main serial communication pins on the
+// Arduino Mega. You will not be able to use the Serial Monitor for debugging
+// while the sensor is connected to these pins.
+// ====================================================================================
+
 #include "MotorControl.h"
 #include "UltrasonicSensor.h"
 #include "PixyCam.h"
