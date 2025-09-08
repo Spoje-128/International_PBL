@@ -4,16 +4,21 @@
 #include "PixyCam.h"
 #include "ServoController.h"
 #include "PIDController.h"
-#include "WallFollowingController.h"
 
 // --- Tuning Constants ---
+const int SEARCH_SPEED = 140;
 const int TRACKING_BASE_SPEED = 160;
 const int TURN_SPEED = 150;
 const int MAX_SPEED = 255;
 
-const float COLLISION_THRESHOLD_FRONT_DEFAULT = 12.0; // Slightly increased for cylinders
-const float COLLISION_THRESHOLD_FRONT_TRACKING = 4.0; // Allow getting closer to the target
+const float COLLISION_THRESHOLD_FRONT_DEFAULT = 12.0;
+const float COLLISION_THRESHOLD_FRONT_TRACKING = 4.0;
 const float COLLISION_THRESHOLD_SIDE = 7.0;
+
+const float SEARCH_WALL_DETECT_THRESHOLD = 35.0;
+const float SEARCH_WALL_TARGET_DISTANCE = 15.0;
+const float SEARCH_KP = 2.5; // P-gain for wall following
+const float SIN_26_5_DEG = 0.4462;
 
 const uint8_t TARGET_SIGNATURE = 1;
 const int PIXY_CENTER_X = PixyCam::PIXY_FRAME_WIDTH / 2;
@@ -31,7 +36,6 @@ PixyCam pixy;
 ServoController servo;
 Block targetBlock;
 PIDController pidController(KP, KI, KD);
-WallFollowingController wallFollower(&motors);
 
 // --- Debugging ---
 unsigned long lastDebugPrintTime = 0;
@@ -44,7 +48,7 @@ void printDebugInfo(float l, float c, float r, bool targetVisible, float f_thres
 bool handleCollision(float l, float c, float r, bool targetVisible);
 bool handleAttack(bool targetVisible);
 void handleTracking();
-void handleSearching(float l, float r);
+void handleSearching(float l, float c, float r);
 
 // --- Setup ---
 void setup() {
@@ -71,7 +75,7 @@ void loop() {
   if (targetVisible) {
     handleTracking();
   } else {
-    handleSearching(leftDist, rightDist);
+    handleSearching(leftDist, centerDist, rightDist);
   }
 
   if (millis() - lastDebugPrintTime > DEBUG_PRINT_INTERVAL) {
@@ -85,28 +89,14 @@ void loop() {
 
 bool handleCollision(float l, float c, float r, bool targetVisible) {
   float front_thresh = targetVisible ? COLLISION_THRESHOLD_FRONT_TRACKING : COLLISION_THRESHOLD_FRONT_DEFAULT;
-  bool front_coll = (c > 0 && c < front_thresh);
-  bool side_coll = (l > 0 && l < COLLISION_THRESHOLD_SIDE) || (r > 0 && r < COLLISION_THRESHOLD_SIDE);
-
-  if (front_coll || side_coll) {
+  if ((c > 0 && c < front_thresh) || (l > 0 && l < COLLISION_THRESHOLD_SIDE) || (r > 0 && r < COLLISION_THRESHOLD_SIDE)) {
     debugState = "AVOIDING";
     motors.stop();
     motors.backward(TURN_SPEED);
     delay(400);
-
-    // If the collision is mainly from the front (like a cylinder),
-    // perform a decisive 90-degree turn to clear it.
-    if (front_coll && !(side_coll)) {
-        motors.turnLeft(TURN_SPEED);
-        delay(800); // 800ms should be roughly a 90-degree turn
-    }
-    // Otherwise, for side collisions or corner cases, turn toward the most open space.
-    else {
-        if (l > r) motors.turnLeft(TURN_SPEED);
-        else motors.turnRight(TURN_SPEED);
-        delay(600);
-    }
-
+    if (l > r) motors.turnLeft(TURN_SPEED);
+    else motors.turnRight(TURN_SPEED);
+    delay(600);
     motors.stop();
     pidController.reset();
     return true;
@@ -126,7 +116,7 @@ bool handleAttack(bool targetVisible) {
     delay(1000);
     motors.stop();
     pidController.reset();
-    pixy.resetTracking(); // Forget the old target
+    pixy.resetTracking();
     return true;
   }
   return false;
@@ -146,11 +136,46 @@ void handleTracking() {
   }
 }
 
-void handleSearching(float l, float r) {
-  debugState = "SEARCH/WALL_FOLLOW";
+void handleSearching(float l, float c, float r) {
   pidController.reset();
-  pixy.resetTracking(); // Ensure we don't have a stale target lock
-  wallFollower.execute(l, r);
+  pixy.resetTracking();
+
+  bool frontWall = (c > 0 && c < SEARCH_WALL_DETECT_THRESHOLD);
+  bool leftWall = (l > 0 && l < SEARCH_WALL_DETECT_THRESHOLD);
+  bool rightWall = (r > 0 && r < SEARCH_WALL_DETECT_THRESHOLD);
+
+  int leftSpeed = SEARCH_SPEED;
+  int rightSpeed = SEARCH_SPEED;
+
+  if (frontWall) {
+    debugState = "SEARCH (AVOID FRONT)";
+    leftSpeed = -TURN_SPEED; // Turn right
+    rightSpeed = TURN_SPEED;
+  } else if (leftWall && rightWall) {
+    debugState = "SEARCH (CENTERING)";
+    float error = (r * SIN_26_5_DEG) - (l * SIN_26_5_DEG);
+    int correction = (int)(SEARCH_KP * error);
+    leftSpeed += correction;
+    rightSpeed -= correction;
+  } else if (leftWall) {
+    debugState = "SEARCH (FOLLOW L)";
+    float error = SEARCH_WALL_TARGET_DISTANCE - (l * SIN_26_5_DEG);
+    int correction = (int)(SEARCH_KP * error);
+    leftSpeed -= correction;
+    rightSpeed += correction;
+  } else if (rightWall) {
+    debugState = "SEARCH (FOLLOW R)";
+    float error = (r * SIN_26_5_DEG) - SEARCH_WALL_TARGET_DISTANCE;
+    int correction = (int)(SEARCH_KP * error);
+    leftSpeed += correction;
+    rightSpeed -= correction;
+  } else {
+    debugState = "SEARCH (OPEN SPACE)";
+    leftSpeed = TURN_SPEED; // Spin to find a wall
+    rightSpeed = -TURN_SPEED;
+  }
+
+  motors.setSpeeds(constrain(leftSpeed, -MAX_SPEED, MAX_SPEED), constrain(rightSpeed, -MAX_SPEED, MAX_SPEED));
 }
 
 // --- Utility Functions ---
