@@ -1,17 +1,9 @@
 #include <Arduino.h>
-
-// ====================================================================================
-// !! WARNING !!
-// This code is configured to use pins 0 and 1 for the left ultrasonic sensor,
-// as specified in pinAssignment.md. These are the main serial communication pins
-// on the Arduino Mega. You will not be able to use the Serial Monitor for
-// debugging while the sensor is connected to these pins.
-// ====================================================================================
-
 #include "MotorControl.h"
 #include "UltrasonicSensor.h"
 #include "PixyCam.h"
 #include "ServoController.h"
+#include "PIDController.h"
 
 // --- Tuning Constants ---
 // Speeds (PWM range 130-255 as per requirements)
@@ -35,44 +27,34 @@ const uint8_t TARGET_SIGNATURE = 1;
 const int PIXY_CENTER_X = PixyCam::PIXY_FRAME_WIDTH / 2;
 const int TARGET_DEADZONE_X = 20; // Pixels from center to consider "centered"
 const int TARGET_ATTACK_AREA = 12000; // PIXY block area to trigger attack
-const float KP = 0.4; // Proportional gain for steering correction
+const float KP = 0.4; // Proportional gain
+const float KI = 0.02; // Integral gain
+const float KD = 0.1; // Derivative gain
 
 // --- Global Objects ---
 MotorControl motors;
 UltrasonicSensor ultrasonic;
 PixyCam pixy;
 ServoController servo;
-Block targetBlock; // To store data of the detected target
+Block targetBlock;
+PIDController pidController(KP, KI, KD);
 
 // --- State/Timing Variables ---
-unsigned long lastActionTime = 0;
-const unsigned long SEARCH_TURN_DURATION = 1500; // ms
+unsigned long lastSearchTurnTime = 0;
+const unsigned long SEARCH_TURN_INTERVAL = 1500; // ms
 bool searchingLeft = true;
-
-// --- Helper Functions ---
-void printDistances(float l, float c, float r) {
-  Serial.print("Dist L:");
-  Serial.print(l, 0);
-  Serial.print(" C:");
-  Serial.print(c, 0);
-  Serial.print(" R:");
-  Serial.println(r, 0);
-}
 
 // --- Setup ---
 void setup() {
   Serial.begin(9600);
-  while (!Serial); // Wait for serial port to connect
+  while (!Serial);
 
   Serial.println("Robot starting up...");
-
   motors.init();
   ultrasonic.init();
   pixy.init();
   servo.init();
 
-  // A small delay to ensure all sensors are stable
-  delay(1000);
   Serial.println("Initialization complete. Starting main loop.");
 }
 
@@ -83,134 +65,110 @@ void loop() {
   ultrasonic.readDistances(leftDist, centerDist, rightDist);
   bool targetVisible = pixy.getBestBlock(TARGET_SIGNATURE, targetBlock);
 
-  // 2. Behavior-based control logic (highest priority first)
-
-  // --- Behavior 1: Collision Avoidance ---
+  // --- Behavior 1: Collision Avoidance (Highest Priority) ---
   if ((centerDist > 0 && centerDist < COLLISION_THRESHOLD_FRONT) ||
       (leftDist > 0 && leftDist < COLLISION_THRESHOLD_SIDE) ||
       (rightDist > 0 && rightDist < COLLISION_THRESHOLD_SIDE)) {
 
     Serial.println("--- AVOIDING COLLISION ---");
-    printDistances(leftDist, centerDist, rightDist);
-
-    // Stop forward motion
     motors.stop();
-
-    // Simple avoidance: back up a little, then turn towards the most open space
     motors.backward(TURN_SPEED);
-    delay(400); // Back up for a short duration
+    delay(400);
 
     if (leftDist > rightDist) {
-      Serial.println("Turning left (more space)");
       motors.turnLeft(TURN_SPEED);
     } else {
-      Serial.println("Turning right (more space)");
       motors.turnRight(TURN_SPEED);
     }
-    delay(600); // Turn for a short duration
+    delay(600);
     motors.stop();
-    return; // End this loop iteration
+    pidController.reset(); // Reset PID state after avoidance
+    return;
   }
 
   // --- Behavior 2: Target Tracking and Attack ---
   else if (targetVisible) {
-    Serial.print("--- TRACKING TARGET ---, ");
-    Serial.print("X:");
-    Serial.print(targetBlock.x);
-    Serial.print(" Area:");
-    Serial.println(targetBlock.width * targetBlock.height);
-
     int area = targetBlock.width * targetBlock.height;
 
-    // Check if target is close enough to attack
     if (area > TARGET_ATTACK_AREA) {
       Serial.println("!!! ATTACKING TARGET !!!");
       motors.stop();
       servo.attack();
-      delay(1000); // Wait for servo to swing
+      delay(1000);
       servo.reset();
       delay(500);
-
-      // After attacking, turn a bit to look for a new target
       motors.turnLeft(TURN_SPEED);
       delay(1000);
       motors.stop();
+      pidController.reset();
       return;
     }
 
-    // If not close enough, continue tracking
+    Serial.println("--- TRACKING TARGET ---");
     int error = targetBlock.x - PIXY_CENTER_X;
 
-    // If target is centered, move straight forward
     if (abs(error) <= TARGET_DEADZONE_X) {
       motors.forward(TRACKING_BASE_SPEED);
-    }
-    // If target is not centered, use P-controller to steer
-    else {
-      int speedCorrection = (int)(KP * error);
-
-      int leftSpeed = TRACKING_BASE_SPEED - speedCorrection;
-      int rightSpeed = TRACKING_BASE_SPEED + speedCorrection;
-
-      // Constrain motor speeds to valid PWM range
-      leftSpeed = constrain(leftSpeed, 130, MAX_SPEED);
-      rightSpeed = constrain(rightSpeed, 130, MAX_SPEED);
-
+      pidController.reset();
+    } else {
+      int speedCorrection = (int)pidController.calculate(error);
+      int leftSpeed = constrain(TRACKING_BASE_SPEED - speedCorrection, 130, MAX_SPEED);
+      int rightSpeed = constrain(TRACKING_BASE_SPEED + speedCorrection, 130, MAX_SPEED);
       motors.setSpeeds(leftSpeed, rightSpeed);
     }
   }
 
-  // --- Behavior 3: Search / Wall Following ---
+  // --- Behavior 3: Search / Wall Following (Lowest Priority) ---
   else {
-    float perp_dist_L = leftDist * SIN_26_5_DEG;
-    float perp_dist_R = rightDist * SIN_26_5_DEG;
+    pidController.reset(); // Reset PID if no target is visible
+    int leftSpeed = SEARCH_SPEED;
+    int rightSpeed = SEARCH_SPEED;
 
-    bool leftWallDetected = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
-    bool rightWallDetected = (rightDist > 0 && rightDist < WALL_DETECT_THRESHOLD);
-
-    int correction = 0;
-
-    if (leftWallDetected && !rightWallDetected) {
-      // Follow left wall
-      Serial.println("--- FOLLOWING LEFT WALL ---");
-      float error = WALL_TARGET_DISTANCE - perp_dist_L;
-      correction = (int)(WALL_FOLLOW_KP * error);
-    } else if (!leftWallDetected && rightWallDetected) {
-      // Follow right wall
-      Serial.println("--- FOLLOWING RIGHT WALL ---");
-      float error = perp_dist_R - WALL_TARGET_DISTANCE;
-      correction = (int)(WALL_FOLLOW_KP * error);
-    } else if (leftWallDetected && rightWallDetected) {
-        // Center between two walls
-        Serial.println("--- CENTERING BETWEEN WALLS ---");
-        float error = perp_dist_R - perp_dist_L; // if positive, too close to left wall
-        correction = (int)(WALL_FOLLOW_KP * error * 0.5); // use smaller gain for centering
-    }
-    else {
-      // No walls detected, perform simple search pattern
-      Serial.println("--- SEARCHING (NO WALLS) ---");
-      // Move forward while turning periodically
-      motors.forward(SEARCH_SPEED);
-      if (millis() - lastActionTime > SEARCH_TURN_DURATION) {
-        if (searchingLeft) {
-          motors.turnLeft(SEARCH_SPEED);
-        } else {
-          motors.turnRight(SEARCH_SPEED);
-        }
+    // Determine base action: search turn or move forward
+    if (millis() - lastSearchTurnTime > SEARCH_TURN_INTERVAL) {
+        lastSearchTurnTime = millis();
         searchingLeft = !searchingLeft;
-        lastActionTime = millis();
-        delay(500);
-      }
-      return; // exit loop here since motor command was sent
+        Serial.println("--- SEARCHING (TURNING) ---");
+        if (searchingLeft) {
+            leftSpeed = -TURN_SPEED;
+            rightSpeed = TURN_SPEED;
+        } else {
+            leftSpeed = TURN_SPEED;
+            rightSpeed = -TURN_SPEED;
+        }
     }
+    // else, default is forward (leftSpeed = rightSpeed = SEARCH_SPEED)
 
-    // Apply correction for wall following
-    int leftSpeed = SEARCH_SPEED - correction;
-    int rightSpeed = SEARCH_SPEED + correction;
+    // If moving forward, check for walls and apply correction
+    bool isMovingForward = (leftSpeed == rightSpeed);
+    if(isMovingForward) {
+        float perp_dist_L = leftDist * SIN_26_5_DEG;
+        float perp_dist_R = rightDist * SIN_26_5_DEG;
+        bool leftWall = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
+        bool rightWall = (rightDist > 0 && rightDist < WALL_DETECT_THRESHOLD);
+        int correction = 0;
 
-    leftSpeed = constrain(leftSpeed, 130, MAX_SPEED);
-    rightSpeed = constrain(rightSpeed, 130, MAX_SPEED);
-
-    motors.setSpeeds(leftSpeed, rightSpeed);
+        if (leftWall && !rightWall) {
+            Serial.println("--- FOLLOWING LEFT WALL ---");
+            float error = WALL_TARGET_DISTANCE - perp_dist_L;
+            correction = (int)(WALL_FOLLOW_KP * error);
+        } else if (!leftWall && rightWall) {
+            Serial.println("--- FOLLOWING RIGHT WALL ---");
+            float error = perp_dist_R - WALL_TARGET_DISTANCE;
+            correction = (int)(WALL_FOLLOW_KP * error);
+        } else if (leftWall && rightWall) {
+            Serial.println("--- CENTERING BETWEEN WALLS ---");
+            float error = perp_dist_R - perp_dist_L;
+            correction = (int)(WALL_FOLLOW_KP * error * 0.5);
+        } else {
+            Serial.println("--- SEARCHING (NO WALLS) ---");
+        }
+        leftSpeed -= correction;
+        rightSpeed += correction;
+    }
+    // Constrain speeds, allowing for negative values for turning
+    int finalLeft = constrain(leftSpeed, -MAX_SPEED, MAX_SPEED);
+    int finalRight = constrain(rightSpeed, -MAX_SPEED, MAX_SPEED);
+    motors.setSpeeds(finalLeft, finalRight);
   }
 }

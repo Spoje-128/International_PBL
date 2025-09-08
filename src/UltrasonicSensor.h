@@ -7,26 +7,21 @@ class UltrasonicSensor {
 public:
   UltrasonicSensor();
   void init();
-  // Reads all three sensors and returns distances in cm
+
+  // Reads all three sensors sequentially.
+  // This is a blocking function, but uses a short timeout to keep the loop fast.
   void readDistances(float& left, float& center, float& right);
 
 private:
-  // Pins based on pinAssignment.md for MEGA
-  // WARNING: Pins 0 and 1 are the primary Serial (TX/RX) on an Arduino Mega.
-  // Using them for the left ultrasonic sensor means you CANNOT use Serial.print()
-  // for debugging at the same time. The code will function, but debugging via the
-  // USB serial monitor will be unreliable or impossible.
-  static const int LEFT_TRIG_PIN = 0;
-  static const int LEFT_ECHO_PIN = 1;
-  
-  static const int CENTER_TRIG_PIN = 20;
-  static const int CENTER_ECHO_PIN = 21;
-  
-  // A0 and A1 are analog pins, but can be used as digital pins
-  static const int RIGHT_TRIG_PIN = A1;
-  static const int RIGHT_ECHO_PIN = A0;
-  
-  // Helper function to measure distance for a single sensor
+  // Pins that do not conflict with Serial communication
+  static const int LEFT_TRIG_PIN = 22;
+  static const int LEFT_ECHO_PIN = 23;
+  static const int CENTER_TRIG_PIN = 24;
+  static const int CENTER_ECHO_PIN = 25;
+  static const int RIGHT_TRIG_PIN = 26;
+  static const int RIGHT_ECHO_PIN = 27;
+
+  // Helper function to measure distance with a timeout
   float measureDistance(int trigPin, int echoPin);
 };
 
