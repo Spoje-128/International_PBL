@@ -38,14 +38,9 @@ bool PixyCam::getBestBlock(uint8_t signature, Block& foundBlock) {
 
   // If a valid block was found
   if (bestBlockIndex != -1) {
-    // Populate the Block struct with the data from the best block
-    foundBlock.signature = pixy.ccc.blocks[bestBlockIndex].m_signature;
-    foundBlock.x = pixy.ccc.blocks[bestBlockIndex].m_x;
-    foundBlock.y = pixy.ccc.blocks[bestBlockIndex].m_y;
-    foundBlock.width = pixy.ccc.blocks[bestBlockIndex].m_width;
-    foundBlock.height = pixy.ccc.blocks[bestBlockIndex].m_height;
-    foundBlock.age = pixy.ccc.blocks[bestBlockIndex].m_age;
-    foundBlock.index = pixy.ccc.blocks[bestBlockIndex].m_index;
+    // Assign the found block data to the block passed by reference.
+    // This copies the entire struct.
+    foundBlock = pixy.ccc.blocks[bestBlockIndex];
     return true;
   }
 

@@ -36,9 +36,11 @@ const uint8_t TARGET_SIGNATURE = 1;
 const int PIXY_CENTER_X = PixyCam::PIXY_FRAME_WIDTH / 2;
 const int TARGET_DEADZONE_X = 20; // Pixels from center to consider "centered"
 const int TARGET_ATTACK_AREA = 12000; // PIXY block area to trigger attack
-const float KP = 0.4; // Proportional gain
-const float KI = 0.02; // Integral gain
-const float KD = 0.1; // Derivative gain
+
+// PID gains for steering correction - now variables to allow for tuning
+float KP = 0.4;
+float KI = 0.02;
+float KD = 0.1;
 
 // --- Global Objects ---
 MotorControl motors;
@@ -53,6 +55,9 @@ unsigned long lastSearchTurnTime = 0;
 const unsigned long SEARCH_TURN_INTERVAL = 1500; // ms
 bool searchingLeft = true;
 
+// --- Function Prototypes ---
+void handleSerialTuning();
+
 // --- Setup ---
 void setup() {
   Serial.begin(9600);
@@ -65,10 +70,13 @@ void setup() {
   servo.init();
 
   Serial.println("Initialization complete. Starting main loop.");
+  Serial.println("Send 'pX.X', 'iX.X', or 'dX.X' to tune PID gains.");
 }
 
 // --- Main Loop ---
 void loop() {
+  handleSerialTuning();
+
   // 1. Read all sensor data
   float leftDist, centerDist, rightDist;
   ultrasonic.readDistances(leftDist, centerDist, rightDist);
@@ -97,7 +105,7 @@ void loop() {
 
   // --- Behavior 2: Target Tracking and Attack ---
   else if (targetVisible) {
-    int area = targetBlock.width * targetBlock.height;
+    int area = targetBlock.m_width * targetBlock.m_height;
 
     if (area > TARGET_ATTACK_AREA) {
       Serial.println("!!! ATTACKING TARGET !!!");
@@ -114,7 +122,7 @@ void loop() {
     }
 
     Serial.println("--- TRACKING TARGET ---");
-    int error = targetBlock.x - PIXY_CENTER_X;
+    int error = targetBlock.m_x - PIXY_CENTER_X;
 
     if (abs(error) <= TARGET_DEADZONE_X) {
       motors.forward(TRACKING_BASE_SPEED);
@@ -133,7 +141,6 @@ void loop() {
     int leftSpeed = SEARCH_SPEED;
     int rightSpeed = SEARCH_SPEED;
 
-    // Determine base action: search turn or move forward
     if (millis() - lastSearchTurnTime > SEARCH_TURN_INTERVAL) {
         lastSearchTurnTime = millis();
         searchingLeft = !searchingLeft;
@@ -146,38 +153,73 @@ void loop() {
             rightSpeed = -TURN_SPEED;
         }
     }
-    // else, default is forward (leftSpeed = rightSpeed = SEARCH_SPEED)
+    else {
+        bool isMovingForward = (leftSpeed == rightSpeed);
+        if(isMovingForward) {
+            float perp_dist_L = leftDist * SIN_26_5_DEG;
+            float perp_dist_R = rightDist * SIN_26_5_DEG;
+            bool leftWall = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
+            bool rightWall = (rightDist > 0 && rightDist < WALL_DETECT_THRESHOLD);
+            int correction = 0;
 
-    // If moving forward, check for walls and apply correction
-    bool isMovingForward = (leftSpeed == rightSpeed);
-    if(isMovingForward) {
-        float perp_dist_L = leftDist * SIN_26_5_DEG;
-        float perp_dist_R = rightDist * SIN_26_5_DEG;
-        bool leftWall = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
-        bool rightWall = (rightDist > 0 && rightDist < WALL_DETECT_THRESHOLD);
-        int correction = 0;
-
-        if (leftWall && !rightWall) {
-            Serial.println("--- FOLLOWING LEFT WALL ---");
-            float error = WALL_TARGET_DISTANCE - perp_dist_L;
-            correction = (int)(WALL_FOLLOW_KP * error);
-        } else if (!leftWall && rightWall) {
-            Serial.println("--- FOLLOWING RIGHT WALL ---");
-            float error = perp_dist_R - WALL_TARGET_DISTANCE;
-            correction = (int)(WALL_FOLLOW_KP * error);
-        } else if (leftWall && rightWall) {
-            Serial.println("--- CENTERING BETWEEN WALLS ---");
-            float error = perp_dist_R - perp_dist_L;
-            correction = (int)(WALL_FOLLOW_KP * error * 0.5);
-        } else {
-            Serial.println("--- SEARCHING (NO WALLS) ---");
+            if (leftWall && !rightWall) {
+                Serial.println("--- FOLLOWING LEFT WALL ---");
+                float error = WALL_TARGET_DISTANCE - perp_dist_L;
+                correction = (int)(WALL_FOLLOW_KP * error);
+            } else if (!leftWall && rightWall) {
+                Serial.println("--- FOLLOWING RIGHT WALL ---");
+                float error = perp_dist_R - WALL_TARGET_DISTANCE;
+                correction = (int)(WALL_FOLLOW_KP * error);
+            } else if (leftWall && rightWall) {
+                Serial.println("--- CENTERING BETWEEN WALLS ---");
+                float error = perp_dist_R - perp_dist_L;
+                correction = (int)(WALL_FOLLOW_KP * error * 0.5);
+            } else {
+                Serial.println("--- SEARCHING (NO WALLS) ---");
+            }
+            leftSpeed -= correction;
+            rightSpeed += correction;
         }
-        leftSpeed -= correction;
-        rightSpeed += correction;
     }
-    // Constrain speeds, allowing for negative values for turning
     int finalLeft = constrain(leftSpeed, -MAX_SPEED, MAX_SPEED);
     int finalRight = constrain(rightSpeed, -MAX_SPEED, MAX_SPEED);
     motors.setSpeeds(finalLeft, finalRight);
+  }
+}
+
+void handleSerialTuning() {
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+    if (input.length() < 2) return;
+
+    char gainType = input.charAt(0);
+    float value = input.substring(1).toFloat();
+
+    switch (gainType) {
+      case 'p':
+      case 'P':
+        KP = value;
+        Serial.print("Set Proportional gain (KP) to: ");
+        Serial.println(KP);
+        break;
+      case 'i':
+      case 'I':
+        KI = value;
+        Serial.print("Set Integral gain (KI) to: ");
+        Serial.println(KI);
+        break;
+      case 'd':
+      case 'D':
+        KD = value;
+        Serial.print("Set Derivative gain (KD) to: ");
+        Serial.println(KD);
+        break;
+      default:
+        Serial.println("Invalid gain type. Use 'p', 'i', or 'd'.");
+        return;
+    }
+    pidController.setGains(KP, KI, KD);
+    pidController.reset();
   }
 }
