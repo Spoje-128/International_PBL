@@ -53,9 +53,7 @@ bool handleStuckCondition(float l, float c, float r, int currentL, int currentR)
 bool handleAttack(bool targetVisible);
 
 // New architecture prototypes
-void calculateMotorOutputs(int& finalLeft, int& finalRight, bool targetVisible, float l, float c, float r);
-void calculateTrackingOutput(int& left, int& right, bool targetVisible);
-void calculateAvoidanceOutput(int& left, int& right, float l_dist, float c_dist, float r_dist);
+int calculateCorrection(bool targetVisible, float l, float c, float r);
 
 
 // --- Setup ---
@@ -69,7 +67,7 @@ void setup() {
   Serial.println("Send 'pX.X', 'iX.X', or 'dX.X' to tune PID gains.");
 }
 
-// --- Main Loop: Refactored for Behavior Blending ---
+// --- Main Loop: Base Speed + Correction Model ---
 void loop() {
   handleSerialTuning();
 
@@ -86,31 +84,33 @@ void loop() {
     return; // Stop processing further behaviors if attacking
   }
 
-  // 3. Calculate and Blend Behaviors
-  int finalLeft = 0;
-  int finalRight = 0;
-  calculateMotorOutputs(finalLeft, finalRight, targetVisible, leftDist, centerDist, rightDist);
+  // 3. Determine base speed and correction
+  const int SEARCH_BASE_SPEED = 140;
+  int baseSpeed = targetVisible ? TRACKING_BASE_SPEED : SEARCH_BASE_SPEED;
+  int turnCorrection = calculateCorrection(targetVisible, leftDist, centerDist, rightDist);
 
-  // 4. Scale and Constrain Outputs for Motors
-  // This logic maps the blended output to the motor's effective PWM range.
+  // 4. Set Motor Speeds
+  int leftSpeed = baseSpeed - turnCorrection;
+  int rightSpeed = baseSpeed + turnCorrection;
+
+  // 5. Scale and Constrain Outputs for Motors
   int motorL, motorR;
-  if (finalLeft > 0) {
-    motorL = map(finalLeft, 1, MAX_SPEED, 130, MAX_SPEED);
-  } else if (finalLeft < 0) {
-    motorL = map(finalLeft, -MAX_SPEED, -1, -MAX_SPEED, -130);
+  if (leftSpeed > 0) {
+    motorL = map(leftSpeed, 1, MAX_SPEED, 130, MAX_SPEED);
+  } else if (leftSpeed < 0) {
+    motorL = map(leftSpeed, -MAX_SPEED, -1, -MAX_SPEED, -130);
   } else {
     motorL = 0;
   }
 
-  if (finalRight > 0) {
-    motorR = map(finalRight, 1, MAX_SPEED, 130, MAX_SPEED);
-  } else if (finalRight < 0) {
-    motorR = map(finalRight, -MAX_SPEED, -1, -MAX_SPEED, -130);
+  if (rightSpeed > 0) {
+    motorR = map(rightSpeed, 1, MAX_SPEED, 130, MAX_SPEED);
+  } else if (rightSpeed < 0) {
+    motorR = map(rightSpeed, -MAX_SPEED, -1, -MAX_SPEED, -130);
   } else {
     motorR = 0;
   }
 
-  // 5. Actuate Motors
   motors.setSpeeds(motorL, motorR);
 
 
@@ -119,40 +119,6 @@ void loop() {
     printDebugInfo(leftDist, centerDist, rightDist, targetVisible);
     lastDebugPrintTime = millis();
   }
-}
-
-// --- Behavior Blending ---
-
-void calculateMotorOutputs(int& finalLeft, int& finalRight, bool targetVisible, float l, float c, float r) {
-    int trackL = 0, trackR = 0;
-    int avoidL = 0, avoidR = 0;
-
-    calculateTrackingOutput(trackL, trackR, targetVisible);
-    calculateAvoidanceOutput(avoidL, avoidR, l, c, r);
-
-    // --- Dynamic Weighting ---
-    float avoidWeight = 0.0;
-    float min_dist = 1000.0;
-    if (l > 0) min_dist = min(min_dist, l);
-    if (c > 0) min_dist = min(min_dist, c);
-    if (r > 0) min_dist = min(min_dist, r);
-
-    if (min_dist < COLLISION_THRESHOLD_FRONT_DEFAULT) {
-        // As the robot gets closer to an object, the weight of avoidance increases quadratically
-        avoidWeight = 1.0 - (min_dist / COLLISION_THRESHOLD_FRONT_DEFAULT);
-        avoidWeight *= avoidWeight;
-    }
-
-    float trackWeight = 1.0 - avoidWeight;
-
-    // --- Blending ---
-    // We blend the 'desire' vectors from each behavior
-    finalLeft = (int)(trackWeight * trackL + avoidWeight * avoidL);
-    finalRight = (int)(trackWeight * trackR + avoidWeight * avoidR);
-
-    // TODO: Add stuck detection logic here in Step 5
-
-    // The final values are constrained in the main loop after all calculations.
 }
 
 
@@ -196,60 +162,47 @@ bool handleStuckCondition(float l, float c, float r, int currentL, int currentR)
 }
 
 
-// --- Behavior Implementations (New) ---
+// --- New Main Logic ---
 
-void calculateTrackingOutput(int& left, int& right, bool targetVisible) {
+int calculateCorrection(bool targetVisible, float l, float c, float r) {
+    // 1. Obstacle Avoidance (Highest Priority)
+    // Front sensor is critical
+    if (c > 0 && c < COLLISION_THRESHOLD_FRONT_DEFAULT) {
+        debugState = "AVOID_FRONT";
+        // Turn towards the side with more space
+        if (l > r) {
+            return -150; // Turn Right Sharply
+        } else {
+            return 150;  // Turn Left Sharply
+        }
+    }
+    // Side sensors
+    if (l > 0 && l < COLLISION_THRESHOLD_SIDE) {
+        debugState = "AVOID_LEFT";
+        // Turn right, away from left wall. Proportional control.
+        int correction = (int)(10.0 * (COLLISION_THRESHOLD_SIDE - l));
+        return -correction; // Negative correction turns right
+    }
+    if (r > 0 && r < COLLISION_THRESHOLD_SIDE) {
+        debugState = "AVOID_RIGHT";
+        // Turn left, away from right wall.
+        int correction = (int)(10.0 * (COLLISION_THRESHOLD_SIDE - r));
+        return correction; // Positive correction turns left
+    }
+
+    // 2. Target Tracking
     if (targetVisible) {
         debugState = "TRACKING";
         int error = targetBlock.m_x - PIXY_CENTER_X;
-
-        // Use PID controller to get a turn correction value
-        int speedCorrection = (int)pidController.calculate(error);
-
-        // The base speed is forward, and we adjust each wheel based on the correction
-        left = TRACKING_BASE_SPEED - speedCorrection;
-        right = TRACKING_BASE_SPEED + speedCorrection;
-
-    } else {
-        debugState = "SEARCHING";
-        pidController.reset(); // Reset PID when no target is in sight
-        // Gentle right turn to search for targets
-        left = 150;
-        right = 135;
-    }
-}
-
-void calculateAvoidanceOutput(int& left, int& right, float l_dist, float c_dist, float r_dist) {
-    left = 0;
-    right = 0;
-    int repulsion_strength = 0;
-
-    // Center sensor has highest priority and generates a sharp turn
-    if (c_dist > 0 && c_dist < COLLISION_THRESHOLD_FRONT_DEFAULT) {
-        // Obstacle directly ahead. Generate a strong turn command.
-        // We turn based on which side has more space, or default to left.
-        if (l_dist > r_dist) {
-            left = -TURN_SPEED; // Turn right
-            right = TURN_SPEED;
-        } else {
-            left = TURN_SPEED; // Turn left
-            right = -TURN_SPEED;
-        }
-        return; // This is a critical avoidance, override side sensors
+        // PID controller calculates the necessary correction
+        return (int)pidController.calculate(error);
     }
 
-    // Side sensors generate proportional repulsion
-    if (l_dist > 0 && l_dist < COLLISION_THRESHOLD_SIDE) {
-        repulsion_strength = (int)(100.0 * (1.0 - (l_dist / COLLISION_THRESHOLD_SIDE)));
-        left -= repulsion_strength;  // Slow down left wheel to turn right
-        right += repulsion_strength; // Speed up right wheel to turn right
-    }
-
-    if (r_dist > 0 && r_dist < COLLISION_THRESHOLD_SIDE) {
-        repulsion_strength = (int)(100.0 * (1.0 - (r_dist / COLLISION_THRESHOLD_SIDE)));
-        left += repulsion_strength;  // Speed up left wheel to turn left
-        right -= repulsion_strength; // Slow down right wheel to turn left
-    }
+    // 3. Searching
+    debugState = "SEARCHING";
+    pidController.reset();
+    // Gentle right turn to search
+    return -30;
 }
 
 
