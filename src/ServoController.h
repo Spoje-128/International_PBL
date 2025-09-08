@@ -19,11 +19,11 @@ private:
   // Pin for the servo, as per pinAssignment.md
   static const int SERVO_PIN = 3;
   
-  // The angle for the attack position
-  static const int ATTACK_ANGLE = 90;
+  // The angle for the attack position (0 deg)
+  static const int ATTACK_ANGLE = 0;
 
-  // The angle for the resting position
-  static const int RESET_ANGLE = 0;
+  // The angle for the resting position (90 deg, swung up)
+  static const int RESET_ANGLE = 90;
 
   Servo servo;
 };

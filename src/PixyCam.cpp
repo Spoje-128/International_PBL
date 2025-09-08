@@ -6,8 +6,7 @@ PixyCam::PixyCam() {}
 void PixyCam::init() {
   Serial.println("Initializing Pixy2...");
   pixy.init();
-  // Set camera brightness and saturation for better color detection
-  pixy.setCameraBrightness(80);
+  // Per user feedback, PIXY2 settings are pre-configured. Do not set them in code.
   // Use default lamp settings: Upper LEDs on, lower off
   pixy.setLamp(1, 0);
 }
