@@ -1,33 +1,48 @@
 #include "PixyCam.h"
 #include <Arduino.h>
 
-PixyCam::PixyCam() {}
+PixyCam::PixyCam() : m_lastTrackedIndex(-1) {}
 
 void PixyCam::init() {
   Serial.println("Initializing Pixy2...");
   pixy.init();
-  // Per user feedback, PIXY2 settings are pre-configured. Do not set them in code.
-  // Use default lamp settings: Upper LEDs on, lower off
   pixy.setLamp(1, 0);
 }
 
+void PixyCam::resetTracking() {
+  m_lastTrackedIndex = -1;
+}
+
 bool PixyCam::getBestBlock(uint8_t signature, Block& foundBlock) {
-  // Get all detected blocks from Pixy2
   pixy.ccc.getBlocks(false, signature);
 
   if (pixy.ccc.numBlocks == 0) {
-    return false; // No blocks detected at all
+    resetTracking(); // No blocks visible, so reset tracking
+    return false;
   }
 
+  // --- Sticky Target Logic ---
+  // 1. If we were already tracking a block, try to find it again.
+  if (m_lastTrackedIndex != -1) {
+    for (int i = 0; i < pixy.ccc.numBlocks; i++) {
+      if (pixy.ccc.blocks[i].m_index == m_lastTrackedIndex) {
+        // Found our old block. Update and return.
+        foundBlock = pixy.ccc.blocks[i];
+        return true;
+      }
+    }
+    // If we get here, our tracked block was lost.
+    resetTracking();
+  }
+
+  // 2. If not tracking, or if the tracked block was lost, find the new best block.
+  // The best block is the largest one in the lower half of the screen.
   int largestArea = 0;
   int bestBlockIndex = -1;
-
-  // The vertical midpoint of the screen
   const int screenMidY = PIXY_FRAME_HEIGHT / 2;
 
   for (int i = 0; i < pixy.ccc.numBlocks; i++) {
-    // Check if the block matches the desired signature and is in the lower half of the screen
-    if (pixy.ccc.blocks[i].m_signature == signature && pixy.ccc.blocks[i].m_y > screenMidY) {
+    if (pixy.ccc.blocks[i].m_y > screenMidY) {
       int currentArea = pixy.ccc.blocks[i].m_width * pixy.ccc.blocks[i].m_height;
       if (currentArea > largestArea) {
         largestArea = currentArea;
@@ -36,14 +51,12 @@ bool PixyCam::getBestBlock(uint8_t signature, Block& foundBlock) {
     }
   }
 
-  // If a valid block was found
   if (bestBlockIndex != -1) {
-    // Assign the found block data to the block passed by reference.
-    // This copies the entire struct.
     foundBlock = pixy.ccc.blocks[bestBlockIndex];
+    m_lastTrackedIndex = foundBlock.m_index; // Lock onto this new block
     return true;
   }
 
-  // No block met the criteria
+  // No valid blocks found in the lower half of the screen
   return false;
 }

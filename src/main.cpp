@@ -126,6 +126,7 @@ bool handleAttack(bool targetVisible) {
     delay(1000);
     motors.stop();
     pidController.reset();
+    pixy.resetTracking(); // Forget the old target
     return true;
   }
   return false;
@@ -148,6 +149,7 @@ void handleTracking() {
 void handleSearching(float l, float r) {
   debugState = "SEARCH/WALL_FOLLOW";
   pidController.reset();
+  pixy.resetTracking(); // Ensure we don't have a stale target lock
   wallFollower.execute(l, r);
 }
 
