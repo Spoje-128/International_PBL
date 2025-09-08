@@ -1,44 +1,25 @@
 #include <Arduino.h>
-
-// ====================================================================================
-// !! WARNING !!
-// Per user instruction, this code is configured to use pins 0 and 1 for the left
-// ultrasonic sensor. These are the main serial communication pins on the
-// Arduino Mega. You will not be able to use the Serial Monitor for debugging
-// while the sensor is connected to these pins.
-// ====================================================================================
-
 #include "MotorControl.h"
 #include "UltrasonicSensor.h"
 #include "PixyCam.h"
 #include "ServoController.h"
 #include "PIDController.h"
+#include "WallFollowingController.h"
 
 // --- Tuning Constants ---
-// Speeds (PWM range 130-255 as per requirements)
-const int SEARCH_SPEED = 140;
 const int TRACKING_BASE_SPEED = 160;
 const int TURN_SPEED = 150;
 const int MAX_SPEED = 255;
 
-// Distances (in cm)
-const float COLLISION_THRESHOLD_FRONT_DEFAULT = 10.0;
-const float COLLISION_THRESHOLD_FRONT_TRACKING = 3.0; // Allow getting closer to the target
+const float COLLISION_THRESHOLD_FRONT_DEFAULT = 12.0; // Slightly increased for cylinders
+const float COLLISION_THRESHOLD_FRONT_TRACKING = 4.0; // Allow getting closer to the target
 const float COLLISION_THRESHOLD_SIDE = 7.0;
 
-// Wall Following
-const float WALL_TARGET_DISTANCE = 12.0;
-const float WALL_DETECT_THRESHOLD = 35.0;
-const float WALL_FOLLOW_KP = 2.5;
-const float SIN_26_5_DEG = 0.4462;
-
-// PIXY - Target Tracking
 const uint8_t TARGET_SIGNATURE = 1;
 const int PIXY_CENTER_X = PixyCam::PIXY_FRAME_WIDTH / 2;
 const int TARGET_DEADZONE_X = 20;
 const int TARGET_ATTACK_AREA = 12000;
 
-// PID gains for steering correction
 float KP = 0.4;
 float KI = 0.02;
 float KD = 0.1;
@@ -50,34 +31,33 @@ PixyCam pixy;
 ServoController servo;
 Block targetBlock;
 PIDController pidController(KP, KI, KD);
-
-// --- State/Timing Variables ---
-String robotState = "STARTING";
+WallFollowingController wallFollower(&motors);
 
 // --- Debugging ---
 unsigned long lastDebugPrintTime = 0;
 const unsigned long DEBUG_PRINT_INTERVAL = 500;
+String debugState = "STARTING";
 
 // --- Function Prototypes ---
 void handleSerialTuning();
-void printDebugInfo(float l, float c, float r, bool targetVisible, float front_thresh);
+void printDebugInfo(float l, float c, float r, bool targetVisible, float f_thresh);
+bool handleCollision(float l, float c, float r, bool targetVisible);
+bool handleAttack(bool targetVisible);
+void handleTracking();
+void handleSearching(float l, float r);
 
 // --- Setup ---
 void setup() {
   Serial.begin(9600);
-  while (!Serial);
-
-  Serial.println("Robot starting up...");
   motors.init();
   ultrasonic.init();
   pixy.init();
   servo.init();
-
   Serial.println("Initialization complete. Starting main loop.");
   Serial.println("Send 'pX.X', 'iX.X', or 'dX.X' to tune PID gains.");
 }
 
-// --- Main Loop ---
+// --- Main Loop: High-Level Coordinator ---
 void loop() {
   handleSerialTuning();
 
@@ -85,103 +65,101 @@ void loop() {
   ultrasonic.readDistances(leftDist, centerDist, rightDist);
   bool targetVisible = pixy.getBestBlock(TARGET_SIGNATURE, targetBlock);
 
-  // Dynamically adjust front collision threshold if a target is visible
-  float current_front_threshold = targetVisible ? COLLISION_THRESHOLD_FRONT_TRACKING : COLLISION_THRESHOLD_FRONT_DEFAULT;
+  if (handleCollision(leftDist, centerDist, rightDist, targetVisible)) return;
+  if (handleAttack(targetVisible)) return;
 
-  // --- Behavior 1: Collision Avoidance (Highest Priority) ---
-  if ((centerDist > 0 && centerDist < current_front_threshold) ||
-      (leftDist > 0 && leftDist < COLLISION_THRESHOLD_SIDE) ||
-      (rightDist > 0 && rightDist < COLLISION_THRESHOLD_SIDE)) {
+  if (targetVisible) {
+    handleTracking();
+  } else {
+    handleSearching(leftDist, rightDist);
+  }
 
-    robotState = "AVOIDING";
+  if (millis() - lastDebugPrintTime > DEBUG_PRINT_INTERVAL) {
+    printDebugInfo(leftDist, centerDist, rightDist, targetVisible,
+                   targetVisible ? COLLISION_THRESHOLD_FRONT_TRACKING : COLLISION_THRESHOLD_FRONT_DEFAULT);
+    lastDebugPrintTime = millis();
+  }
+}
+
+// --- Behavior Implementations ---
+
+bool handleCollision(float l, float c, float r, bool targetVisible) {
+  float front_thresh = targetVisible ? COLLISION_THRESHOLD_FRONT_TRACKING : COLLISION_THRESHOLD_FRONT_DEFAULT;
+  bool front_coll = (c > 0 && c < front_thresh);
+  bool side_coll = (l > 0 && l < COLLISION_THRESHOLD_SIDE) || (r > 0 && r < COLLISION_THRESHOLD_SIDE);
+
+  if (front_coll || side_coll) {
+    debugState = "AVOIDING";
     motors.stop();
     motors.backward(TURN_SPEED);
     delay(400);
 
-    if (leftDist > rightDist) {
-      motors.turnLeft(TURN_SPEED);
-    } else {
-      motors.turnRight(TURN_SPEED);
+    // If the collision is mainly from the front (like a cylinder),
+    // perform a decisive 90-degree turn to clear it.
+    if (front_coll && !(side_coll)) {
+        motors.turnLeft(TURN_SPEED);
+        delay(800); // 800ms should be roughly a 90-degree turn
     }
-    delay(600);
+    // Otherwise, for side collisions or corner cases, turn toward the most open space.
+    else {
+        if (l > r) motors.turnLeft(TURN_SPEED);
+        else motors.turnRight(TURN_SPEED);
+        delay(600);
+    }
+
     motors.stop();
     pidController.reset();
-    return;
+    return true;
   }
-  // --- Behavior 2: Target Tracking and Attack ---
-  else if (targetVisible) {
-    int area = targetBlock.m_width * targetBlock.m_height;
+  return false;
+}
 
-    if (area > TARGET_ATTACK_AREA) {
-      robotState = "ATTACKING";
-      motors.stop();
-      servo.attack();
-      delay(1000);
-      servo.reset();
-      delay(500);
-      motors.turnLeft(TURN_SPEED);
-      delay(1000);
-      motors.stop();
-      pidController.reset();
-      return;
-    }
-
-    robotState = "TRACKING";
-    int error = targetBlock.m_x - PIXY_CENTER_X;
-
-    if (abs(error) <= TARGET_DEADZONE_X) {
-      motors.forward(TRACKING_BASE_SPEED);
-      pidController.reset();
-    } else {
-      int speedCorrection = (int)pidController.calculate(error);
-      int leftSpeed = constrain(TRACKING_BASE_SPEED - speedCorrection, 130, MAX_SPEED);
-      int rightSpeed = constrain(TRACKING_BASE_SPEED + speedCorrection, 130, MAX_SPEED);
-      motors.setSpeeds(leftSpeed, rightSpeed);
-    }
-  }
-  // --- Behavior 3: Search / Wall Following (Lowest Priority) ---
-  else {
+bool handleAttack(bool targetVisible) {
+  if (targetVisible && (targetBlock.m_width * targetBlock.m_height > TARGET_ATTACK_AREA)) {
+    debugState = "ATTACKING";
+    motors.stop();
+    servo.attack();
+    delay(1000);
+    servo.reset();
+    delay(500);
+    motors.turnLeft(TURN_SPEED);
+    delay(1000);
+    motors.stop();
     pidController.reset();
-    int leftSpeed = SEARCH_SPEED;
-    int rightSpeed = SEARCH_SPEED;
-
-    bool leftWall = (leftDist > 0 && leftDist < WALL_DETECT_THRESHOLD);
-
-    if (leftWall) {
-        // "Left-hand rule": always prioritize following the left wall.
-        robotState = "WALL_FOLLOW_L";
-        float perp_dist_L = leftDist * SIN_26_5_DEG;
-        float error = WALL_TARGET_DISTANCE - perp_dist_L;
-        int correction = (int)(WALL_FOLLOW_KP * error);
-        leftSpeed -= correction;
-        rightSpeed += correction;
-    } else {
-        // No left wall found, turn right to find one.
-        robotState = "SEARCH (FIND WALL)";
-        leftSpeed = TURN_SPEED;
-        rightSpeed = -TURN_SPEED; // Turn right
-    }
-
-    int finalLeft = constrain(leftSpeed, -MAX_SPEED, MAX_SPEED);
-    int finalRight = constrain(rightSpeed, -MAX_SPEED, MAX_SPEED);
-    motors.setSpeeds(finalLeft, finalRight);
+    return true;
   }
+  return false;
+}
 
-  if (millis() - lastDebugPrintTime > DEBUG_PRINT_INTERVAL) {
-    printDebugInfo(leftDist, centerDist, rightDist, targetVisible, current_front_threshold);
-    lastDebugPrintTime = millis();
+void handleTracking() {
+  debugState = "TRACKING";
+  int error = targetBlock.m_x - PIXY_CENTER_X;
+  if (abs(error) <= TARGET_DEADZONE_X) {
+    motors.forward(TRACKING_BASE_SPEED);
+    pidController.reset();
+  } else {
+    int speedCorrection = (int)pidController.calculate(error);
+    int leftSpeed = constrain(TRACKING_BASE_SPEED - speedCorrection, 130, MAX_SPEED);
+    int rightSpeed = constrain(TRACKING_BASE_SPEED + speedCorrection, 130, MAX_SPEED);
+    motors.setSpeeds(leftSpeed, rightSpeed);
   }
 }
+
+void handleSearching(float l, float r) {
+  debugState = "SEARCH/WALL_FOLLOW";
+  pidController.reset();
+  wallFollower.execute(l, r);
+}
+
+// --- Utility Functions ---
 
 void handleSerialTuning() {
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');
     input.trim();
     if (input.length() < 2) return;
-
     char gainType = input.charAt(0);
     float value = input.substring(1).toFloat();
-
     switch (gainType) {
       case 'p': case 'P': KP = value; break;
       case 'i': case 'I': KI = value; break;
@@ -196,16 +174,15 @@ void handleSerialTuning() {
   }
 }
 
-void printDebugInfo(float l, float c, float r, bool targetVisible, float front_thresh) {
-    Serial.print("State: "); Serial.print(robotState);
+void printDebugInfo(float l, float c, float r, bool targetVisible, float f_thresh) {
+    Serial.print("State: "); Serial.print(debugState);
     Serial.print(" | Ultra (L,C,R): ");
     Serial.print(l, 0); Serial.print(", ");
     Serial.print(c, 0); Serial.print(", ");
     Serial.print(r, 0);
-    Serial.print(" | Front Thresh: "); Serial.print(front_thresh, 1);
-
-    if (robotState == "TRACKING") {
-        Serial.print(" | Target (X,Area): ");
+    Serial.print(" | F_Thresh: "); Serial.print(f_thresh, 1);
+    if (debugState == "TRACKING") {
+        Serial.print(" | Target(X,A): ");
         Serial.print(targetBlock.m_x); Serial.print(", ");
         Serial.print(targetBlock.m_width * targetBlock.m_height);
     }
