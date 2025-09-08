@@ -15,13 +15,15 @@ public:
   PixyCam();
   void init();
 
-  // Finds the best block based on signature and position criteria.
-  // Returns true if a valid block is found and populates the 'block' argument.
-  // Returns false if no valid block is found.
+  // Finds the best block using "sticky" logic to avoid target switching.
   bool getBestBlock(uint8_t signature, Block& block);
+
+  // Resets the tracking logic to look for a new target.
+  void resetTracking();
 
 private:
   Pixy2 pixy;
+  int m_lastTrackedIndex; // Stores the index of the last block we were tracking
 };
 
 #endif // PIXY_CAM_H
