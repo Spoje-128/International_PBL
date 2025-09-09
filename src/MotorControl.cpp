@@ -5,10 +5,6 @@ MotorControl::MotorControl() {
   // This might need to be adjusted based on wiring.
   rightMotorReversed = false;
   leftMotorReversed = true; // A common configuration
-  
-  // Initialize PWM values
-  currentLeftPWM = 0;
-  currentRightPWM = 0;
 }
 
 void MotorControl::init() {
@@ -88,15 +84,9 @@ void MotorControl::leftWheelStop() {
 void MotorControl::stop() {
   leftWheelStop();
   rightWheelStop();
-  currentLeftPWM = 0;
-  currentRightPWM = 0;
 }
 
 void MotorControl::setSpeeds(int left_pwm, int right_pwm) {
-  // Store current PWM values for debugging
-  currentLeftPWM = left_pwm;
-  currentRightPWM = right_pwm;
-  
   // Handle left motor
   if (left_pwm > 0) {
     leftWheelForward(constrain(left_pwm, 0, 255));

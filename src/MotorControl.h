@@ -15,10 +15,6 @@ public:
   void stop();
   void setMotorDirection(bool rightReversed, bool leftReversed);
 
-  // Get current PWM values for debugging
-  int getLeftPWM() const { return currentLeftPWM; }
-  int getRightPWM() const { return currentRightPWM; }
-
 private:
   // Pin definitions for L298N motor driver
   static const int ENA = 9;   // Right wheel speed (PWM)
@@ -31,10 +27,6 @@ private:
   // Motor direction reversal flags
   bool rightMotorReversed;
   bool leftMotorReversed;
-
-  // Current PWM values for debugging
-  int currentLeftPWM;
-  int currentRightPWM;
 
   // Low-level motor control functions
   void rightWheelForward(int speed);

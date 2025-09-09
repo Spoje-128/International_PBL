@@ -17,7 +17,6 @@ void PIDController::reset() {
   lastTime = 0;
 }
 
-
 float PIDController::calculate(float error) {
   unsigned long currentTime = millis();
   float dt = (lastTime > 0) ? (float)(currentTime - lastTime) / 1000.0 : 0;
